@@ -124,6 +124,13 @@
       onStatus: function () { StatusModal.open(); }
     });
 
+    // Register tools
+    var webSearch = LuminalMemory.createWebSearchTool({ limit: 3 });
+    memory.registerTool(webSearch);
+    var dateTime = LuminalMemory.createDateTimeTool();
+    memory.registerTool(dateTime);
+    console.log('[Init] Tools registered: web_search, datetime');
+
     // Memory warning listener
     memory.on('memory-warning', function (data) {
       Chat.renderSystem('\u26A0\uFE0F Memory at ' + Math.round(data.utilization * 100) + '% (' + data.usageMB.toFixed(1) + ' MB). Consider trimming.');
@@ -153,6 +160,36 @@
       var pendingNode = memory.chain.append('user', msg);
       memory.bm25.add(pendingNode);
 
+      // Tool discovery: check if any tools match this query
+      var matchedTools = memory.toolRegistry.retrieve(msg);
+      var toolResults = [];
+
+      if (matchedTools.length > 0 && llmAvailable) {
+        // Ask LLM if it should use the tool
+        var toolDecision = await memory._askToolDecision(msg, matchedTools);
+
+        if (toolDecision) {
+          Topbar.setStatus('active', 'TOOL: ' + toolDecision.name.toUpperCase());
+          Chat.renderSystem('\u2692 Using tool: ' + toolDecision.name + ' — "' + (toolDecision.params.query || '').slice(0, 60) + '"');
+          console.log('[Tool] Executing: ' + toolDecision.name, toolDecision.params);
+
+          var toolResult = await memory.toolRegistry.execute(toolDecision.name, toolDecision.params, {
+            query: msg, chain: memory.chain, config: memory.config
+          });
+
+          if (toolResult.success) {
+            toolResults.push({ name: toolDecision.name, result: toolResult.result });
+            // Show results in a tag
+            var resultCount = toolResult.result.results ? toolResult.result.results.length : 0;
+            Chat.renderSystem('\u2713 ' + toolDecision.name + ' returned ' + resultCount + ' results (' + toolResult.elapsed + 'ms)');
+            console.log('[Tool] Success:', toolResult.result);
+          } else {
+            Chat.renderSystem('\u2717 Tool failed: ' + toolResult.error);
+            console.warn('[Tool] Failed:', toolResult.error);
+          }
+        }
+      }
+
       // Real: get window and find recall candidates
       var windowNodes = memory.getWindow();
       var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
@@ -173,6 +210,23 @@
       // Build real prompt
       var messages = memory.window.buildMessages(windowNodes, recallNodes, CONFIG.systemPrompt);
 
+      // Inject tool results into prompt if any
+      if (toolResults.length > 0) {
+        var toolContext = toolResults.map(function (t) {
+          if (t.result && t.result.formatted) {
+            return t.result.formatted;
+          }
+          return typeof t.result === 'string' ? t.result : JSON.stringify(t.result, null, 2);
+        }).join('\n\n');
+
+        // Insert as last system message right before user's question
+        var lastIdx = messages.length - 1;
+        messages.splice(lastIdx, 0, {
+          role: 'system',
+          content: 'Answer using ONLY the search results below. Synthesize the best answer from all sources. Use numbered references like [1], [2] to cite sources. If sources disagree, mention both perspectives.\n\n' + toolContext
+        });
+      }
+
       var response;
       if (llmAvailable) {
         response = await memory.transport.complete(messages);
@@ -188,6 +242,12 @@
       memory.bm25.add(turnNode);
 
       Chat.renderMessage('assistant', response, turnNode.id, true);
+
+      // Append clickable source references if tools were used
+      if (toolResults.length > 0 && toolResults[0].result && toolResults[0].result.results) {
+        Chat.renderSources(toolResults[0].result.results);
+      }
+
       Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
 
       console.log('[Node ' + turnNode.id + '] appended | chain: ' + memory.chain.length + ' | window: ' + memory.getWindow().length);

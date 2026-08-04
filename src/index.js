@@ -17,6 +17,8 @@ import { TfIdf } from "./search/tfidf.js";
 import { MemoryManager } from "./storage/memory.js";
 import { Archive } from "./storage/archive.js";
 import { LLMTransport } from "./transport/llm.js";
+import { ToolRegistry } from "./tools/registry.js";
+import { Tool } from "./tools/base.js";
 
 export class LuminalMemory {
   constructor(userConfig = {}) {
@@ -39,6 +41,9 @@ export class LuminalMemory {
       this.chain, this.bm25, this.bloom, this.tfidf, this.compaction, this.archive, this.transport, this.config
     );
 
+    // Tool system
+    this.toolRegistry = new ToolRegistry(this.config);
+
     this._initialized = false;
   }
 
@@ -52,10 +57,9 @@ export class LuminalMemory {
   }
 
   /**
-   * Full chat cycle: append → retrieve → build prompt → call LLM → append response.
-   * Uses the ConversationManager to calculate budgets for recall + sliding buffers.
+   * Full chat cycle: append → retrieve → discover tools → build prompt → call LLM → execute tools → append response.
    * @param {string} message - user's message
-   * @returns {string} assistant's response
+   * @returns {{ response: string, toolsUsed: object[] }}
    */
   async chat(message) {
     if (!this._initialized) await this.init();
@@ -73,21 +77,47 @@ export class LuminalMemory {
     const userNode = this.chain.append("user", message);
     this.bm25.add(userNode);
 
-    // 2. Retrieve relevant historical nodes (pure math — BM25 + bloom + TF-IDF)
+    // 2. Discover relevant tools for this query
+    const matchedTools = this.toolRegistry.retrieve(message);
+    const toolsUsed = [];
+
+    // 3. If tools matched, ask the LLM to decide whether to use them
+    let toolResults = [];
+    if (matchedTools.length > 0) {
+      const toolDecision = await this._askToolDecision(message, matchedTools);
+      
+      if (toolDecision) {
+        // Execute the tool
+        const result = await this.toolRegistry.execute(toolDecision.name, toolDecision.params, {
+          query: message,
+          chain: this.chain,
+          config: this.config
+        });
+        
+        if (result.success) {
+          toolResults.push({ name: toolDecision.name, result: result.result });
+          toolsUsed.push({ name: toolDecision.name, params: toolDecision.params, result: result.result, elapsed: result.elapsed });
+          console.log(`[Chat] Tool "${toolDecision.name}" executed successfully in ${result.elapsed}ms`);
+        } else {
+          console.warn(`[Chat] Tool "${toolDecision.name}" failed: ${result.error}`);
+        }
+      }
+    }
+
+    // 4. Retrieve relevant historical nodes (pure math — BM25 + bloom + TF-IDF)
     const { nodes: retrievedNodes, deepResponse } = await this.retrieval.retrieve(
       message, this.window.select(this.chain)
     );
 
-    // 3. If deep retrieval handled it, use that response directly
+    // 5. If deep retrieval handled it, use that response directly
     let response;
     if (deepResponse) {
       response = deepResponse;
     } else {
-      // 4. Use ConversationManager to build the prompt with proper budgeting
-      //    It handles: system prompt + attached context + recall buffer + sliding window
+      // 6. Build prompt with tool results + recall + sliding window
       const scoredRetrieved = retrievedNodes.map((node, i) => ({
         node,
-        score: retrievedNodes.length - i // simple rank-based score
+        score: retrievedNodes.length - i
       }));
 
       const { messages } = this.conversationManager.buildPrompt(
@@ -95,15 +125,116 @@ export class LuminalMemory {
         scoredRetrieved
       );
 
-      // 5. Call LLM
+      // Inject tool results before the user's message if any
+      if (toolResults.length > 0) {
+        const toolContext = toolResults.map(t => {
+          const resultText = typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2);
+          return `[Tool: ${t.name}]\n${resultText}`;
+        }).join("\n\n");
+
+        // Insert tool context as a system message before the last user message
+        const lastIdx = messages.length - 1;
+        messages.splice(lastIdx, 0, {
+          role: "system",
+          content: `The following tool was used to gather information for this response:\n\n${toolContext}`
+        });
+      }
+
+      // 7. Call LLM
       response = await this.transport.complete(messages);
     }
 
-    // 6. Append assistant response as new node
+    // 8. Append assistant response as new node
     const assistantNode = this.chain.append("assistant", response);
     this.bm25.add(assistantNode);
 
-    return response;
+    return { response, toolsUsed };
+  }
+
+  /**
+   * Ask the LLM whether it should use a matched tool, and with what parameters.
+   * @param {string} query
+   * @param {{ tool: import('./tools/base.js').Tool, score: number }[]} matchedTools
+   * @returns {{ name: string, params: object }|null}
+   */
+  async _askToolDecision(query, matchedTools) {
+    const toolSchemas = matchedTools.map(m => m.tool.toSchema());
+    
+    const messages = [
+      {
+        role: "system",
+        content: `You are a tool router. Output ONLY JSON, nothing else.\n\n${toolSchemas.map(t => t.instruction).join("\n")}`
+      },
+      {
+        role: "user",
+        content: "whats the weather in tokyo"
+      },
+      {
+        role: "assistant",
+        content: '{"use": true, "tool": "web_search", "params": {"query": "weather tokyo today"}}'
+      },
+      {
+        role: "user",
+        content: query
+      }
+    ];
+
+    try {
+      const decision = await this.transport.complete(messages);
+      console.log(`[Chat] Tool decision raw: ${decision.slice(0, 300)}`);
+
+      // Try parsing as JSON first
+      const jsonMatch = decision.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (!parsed.use) return null;
+          return { name: parsed.tool, params: parsed.params || {} };
+        } catch (e) { /* fall through to other formats */ }
+      }
+
+      // Parse Gemma-style tool calls: <|tool_call>call:name{...}<tool_call|>
+      const gemmaMatch = decision.match(/call:(\w+)\{([^}]*)\}/);
+      if (gemmaMatch) {
+        const toolName = gemmaMatch[1];
+        const paramsRaw = gemmaMatch[2];
+        // Extract key:value pairs from the params (handles quoted values)
+        const params = {};
+        const kvMatches = paramsRaw.matchAll(/(\w+):\s*["<|]*([^"<|,}]+)/g);
+        for (const kv of kvMatches) {
+          params[kv[1]] = kv[2].trim().replace(/^>+/, '').replace(/>+$/, '');
+        }
+        console.log(`[Chat] Parsed Gemma tool call: ${toolName}`, params);
+        return { name: toolName, params };
+      }
+
+      // Parse generic function call format: tool_name("query")
+      const funcMatch = decision.match(/(\w+)\(["']([^"']+)["']\)/);
+      if (funcMatch) {
+        console.log(`[Chat] Parsed function-style call: ${funcMatch[1]}("${funcMatch[2]}")`);
+        return { name: funcMatch[1], params: { query: funcMatch[2] } };
+      }
+
+      // If the model just said it wants to search, extract a short query
+      var searchIntent = decision.match(/search(?:ing)?\s+(?:for\s+)?["']([^"']+)["']/i);
+      if (searchIntent && this.toolRegistry && this.toolRegistry.get('web_search')) {
+        console.log(`[Chat] Inferred search intent: "${searchIntent[1].trim()}"`);
+        return { name: 'web_search', params: { query: searchIntent[1].trim().slice(0, 80) } };
+      }
+
+      return null;
+    } catch (err) {
+      console.warn("[Chat] Tool decision failed:", err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Register a tool with the system.
+   * @param {import('./tools/base.js').Tool} tool
+   */
+  registerTool(tool) {
+    this.toolRegistry.register(tool);
   }
 
   /**
@@ -316,3 +447,7 @@ export { Archive } from "./storage/archive.js";
 export { MemoryManager } from "./storage/memory.js";
 export { LLMTransport } from "./transport/llm.js";
 export { createConfig, defaultConfig } from "./config.js";
+export { Tool } from "./tools/base.js";
+export { ToolRegistry } from "./tools/registry.js";
+export { createWebSearchTool } from "./extensions/web-search.js";
+export { createDateTimeTool } from "./extensions/datetime.js";
