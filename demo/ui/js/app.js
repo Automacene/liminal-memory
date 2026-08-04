@@ -110,6 +110,7 @@
     }
 
     // Init components that need memory ref
+    SelectionMode.init();
     SearchModal.init(memory);
     InspectModal.init(memory);
     StatusModal.init(memory);
@@ -218,75 +219,48 @@
     cancelBtn.addEventListener('click', onNo);
   }
 
-  // === Trim ===
+  // === Trim — enters selection mode ===
   function handleTrim() {
     if (!ready) return;
+    if (SelectionMode.isActive()) { SelectionMode.cancel(); return; }
 
-    var windowNodes = memory.getWindow();
-    var allNodes = memory.chain.all();
-    var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
-    var nodesToTrim = allNodes.filter(function (n) { return !windowIds.has(n.id); });
-
-    if (nodesToTrim.length === 0) {
-      Chat.renderSystem('Nothing to trim \u2014 history is smaller than window size.');
-      return;
-    }
-
-    confirm(
-      'Trim History',
-      'This will archive ' + nodesToTrim.length + ' nodes that are outside the current window to cold storage. They can be restored later. Proceed?',
-      async function () {
-        try {
-          var summary = {
-            startTopic: (nodesToTrim[0].query || nodesToTrim[0].content || '').slice(0, 80),
-            keyDecisions: ['Trimmed via UI'],
-            openThreads: []
-          };
-
-          var result = await memory.trimFromHere(summary);
-          if (result) {
-            Chat.renderSystem('\u2702\uFE0F Trimmed ' + nodesToTrim.length + ' nodes to archive. Compaction marker inserted.');
-          }
-        } catch (err) {
-          Chat.renderSystem('\u274C Trim failed: ' + err.message);
-        }
-        refreshStats();
+    SelectionMode.startTrim(async function (data) {
+      try {
+        var result = await memory.trimKeepRange({
+          keepStart: data.keepStartId,
+          keepEnd: data.keepEndId
+        });
+        var archived = 0;
+        if (result.before) archived += result.before.metadata.nodeCount;
+        if (result.after) archived += result.after.metadata.nodeCount;
+        Chat.removeArchived({ keepStart: data.keepStartId, keepEnd: data.keepEndId });
+        Chat.renderSystem('\u2702\uFE0F Trimmed ' + archived + ' nodes to archive. Keeping nodes ' + data.keepStartId + '\u2013' + data.keepEndId + '.');
+      } catch (err) {
+        Chat.renderSystem('\u274C Trim failed: ' + err.message);
       }
-    );
+      refreshStats();
+    });
   }
 
-  // === Branch ===
+  // === Branch — enters selection mode ===
   function handleBranch() {
     if (!ready) return;
+    if (SelectionMode.isActive()) { SelectionMode.cancel(); return; }
 
-    var allNodes = memory.chain.all();
-    if (allNodes.length === 0) {
-      Chat.renderSystem('Nothing to branch \u2014 no history.');
-      return;
-    }
-
-    confirm(
-      'Branch Session',
-      'This will archive all ' + allNodes.length + ' nodes and start a fresh session. The current conversation will be moved to cold storage. Proceed?',
-      async function () {
-        try {
-          var summary = {
-            startTopic: (allNodes[0].query || allNodes[0].content || '').slice(0, 80),
-            keyDecisions: ['Branched via UI'],
-            openThreads: []
-          };
-
-          var key = await memory.branch(summary);
-          if (key) {
-            Chat.renderSystem('\u2325 Branched. Archived as: ' + key);
-            Chat.clear();
-          }
-        } catch (err) {
-          Chat.renderSystem('\u274C Branch failed: ' + err.message);
+    SelectionMode.startBranch(async function (data) {
+      try {
+        var result = await memory.branchFrom(data.fromNodeId);
+        if (result) {
+          Chat.removeArchived({ fromNodeId: data.fromNodeId });
+          Chat.renderSystem('\u2325 Branched from Node ' + data.fromNodeId + '. ' + result.metadata.nodeCount + ' nodes archived.');
+        } else {
+          Chat.renderSystem('Nothing to archive before Node ' + data.fromNodeId + '.');
         }
-        refreshStats();
+      } catch (err) {
+        Chat.renderSystem('\u274C Branch failed: ' + err.message);
       }
-    );
+      refreshStats();
+    });
   }
 
   // === Refresh stats in topbar + sidebar ===

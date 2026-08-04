@@ -75,9 +75,88 @@
   border: 1px solid var(--color-border-light);
   background: var(--color-surface-frosted);
   backdrop-filter: var(--blur-md);
-  white-space: pre-wrap;
-  word-wrap: break-word;
   position: relative;
+}
+
+/* ---- Markdown content inside assistant messages ---- */
+.message__content.markdown p {
+  margin-bottom: var(--space-10);
+}
+
+.message__content.markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.message__content.markdown strong {
+  font-weight: var(--weight-bold);
+}
+
+.message__content.markdown em {
+  font-style: italic;
+}
+
+.message__content.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-grid);
+}
+
+.message__content.markdown pre {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-12);
+  margin: var(--space-10) 0;
+  overflow-x: auto;
+}
+
+.message__content.markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+
+.message__content.markdown ul,
+.message__content.markdown ol {
+  padding-left: var(--space-20);
+  margin-bottom: var(--space-10);
+}
+
+.message__content.markdown li {
+  margin-bottom: var(--space-4);
+  list-style: disc;
+}
+
+.message__content.markdown ol li {
+  list-style: decimal;
+}
+
+.message__content.markdown h1,
+.message__content.markdown h2,
+.message__content.markdown h3 {
+  font-weight: var(--weight-bold);
+  margin-top: var(--space-12);
+  margin-bottom: var(--space-6);
+}
+
+.message__content.markdown h1 { font-size: var(--text-lg); }
+.message__content.markdown h2 { font-size: var(--text-md); }
+.message__content.markdown h3 { font-size: var(--text-base); }
+
+.message__content.markdown blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: var(--space-12);
+  color: var(--color-text-secondary);
+  margin: var(--space-10) 0;
+}
+
+.message__content.markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 
 /* ---- Wireframe card header strip ---- */

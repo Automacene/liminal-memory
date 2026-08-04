@@ -176,6 +176,29 @@ export class LuminalMemory {
   }
 
   /**
+   * Trim keeping only a specified range — archives everything OUTSIDE the range.
+   * @param {{ keepStart: number, keepEnd: number }} range - node IDs to KEEP
+   * @param {object} [beforeSummary] - summary for the before-block
+   * @param {object} [afterSummary] - summary for the after-block
+   * @returns {{ before: object|null, after: object|null }}
+   */
+  async trimKeepRange({ keepStart, keepEnd }, beforeSummary = null, afterSummary = null) {
+    if (!this._initialized) await this.init();
+    return this.compaction.trimKeepRange(keepStart, keepEnd, beforeSummary, afterSummary);
+  }
+
+  /**
+   * Branch from a specific node — archives everything BEFORE it.
+   * @param {number} fromNodeId - the node to branch from (stays active)
+   * @param {object} [summary]
+   * @returns {object|null}
+   */
+  async branchFrom(fromNodeId, summary = null) {
+    if (!this._initialized) await this.init();
+    return this.compaction.branchFrom(fromNodeId, summary);
+  }
+
+  /**
    * Trim everything before the current sliding window.
    * @param {object} [summary]
    * @returns {object|null}
