@@ -28,6 +28,7 @@
   "author": "Automacene",
   "license": "Apache-2.0",
   "devDependencies": {
-    "esbuild": "^0.21.0"
+    "esbuild": "^0.21.0",
+    "gifuct-js": "^2.1.2"
   }
 }
