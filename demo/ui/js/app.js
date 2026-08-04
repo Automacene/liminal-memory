@@ -249,6 +249,15 @@
 
       var response;
       if (llmAvailable) {
+        // Calculate tokens being sent to LLM
+        var sentTokens = 0;
+        messages.forEach(function (m) {
+          sentTokens += Math.ceil((m.content || '').length / 4);
+        });
+        var sideSent = document.getElementById('side-sent');
+        if (sideSent) sideSent.textContent = sentTokens.toLocaleString();
+        console.log('[Prompt] Sending ~' + sentTokens + ' tokens to LLM (' + messages.length + ' messages)');
+
         // Stream response with live thinking + token display
         var streamMsg = Chat.createStreamingMessage(memory.chain.length + 1);
         response = await memory.transport.stream(messages, {
@@ -356,7 +365,7 @@
   // === Refresh stats in topbar + sidebar ===
   function refreshStats() {
     var s = memory.status();
-    Topbar.updateStats(s.totalNodes, memory.getWindow().length, s.memoryUsageMB);
+    Topbar.updateStats(s.totalNodes, memory.getWindow().length, s.memoryUsageMB, s.totalTokens);
     var sideArchives = document.getElementById('side-archives');
     if (sideArchives) sideArchives.textContent = s.archiveBlocks;
   }

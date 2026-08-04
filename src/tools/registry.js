@@ -11,7 +11,7 @@ export class ToolRegistry {
   constructor(config = {}) {
     this.tools = new Map();         // name → Tool instance
     this.bm25 = new BM25(config.bm25 || { k1: 1.2, b: 0.4 });
-    this.matchThreshold = config.toolMatchThreshold || 0.1;
+    this.matchThreshold = config.toolMatchThreshold || 0.3;
 
     console.log("[ToolRegistry] Initialized | threshold:", this.matchThreshold);
   }
@@ -34,7 +34,7 @@ export class ToolRegistry {
 
   /**
    * Retrieve tools relevant to a query via BM25.
-   * Returns tools whose descriptions match above threshold.
+   * Scores are normalized to 0-1 (relative to best match) for linear threshold behavior.
    * @param {string} query
    * @returns {{ tool: import('./base.js').Tool, score: number }[]}
    */
@@ -42,23 +42,32 @@ export class ToolRegistry {
     if (this.tools.size === 0) return [];
 
     const results = this.bm25.search(query, 5);
+    if (results.length === 0) {
+      console.log(`[ToolRegistry] No tools matched for: "${query.slice(0, 50)}"`);
+      return [];
+    }
+
+    // Normalize scores to 0-1 range (linear)
+    const maxScore = results[0].score;
+    if (maxScore === 0) return [];
+
     const matched = [];
 
     for (const r of results) {
-      if (r.score < this.matchThreshold) continue;
+      const normalized = r.score / maxScore; // 0-1 linear scale
+      if (normalized < this.matchThreshold) continue;
 
-      // nodeId is the tool name (string)
       const toolName = r.nodeId;
       const tool = this.tools.get(toolName);
 
       if (tool) {
-        matched.push({ tool, score: r.score });
-        console.log(`[ToolRegistry] Match: "${tool.name}" score=${r.score.toFixed(3)} for query: "${query.slice(0, 50)}"`);
+        matched.push({ tool, score: normalized });
+        console.log(`[ToolRegistry] Match: "${tool.name}" score=${normalized.toFixed(3)} (raw: ${r.score.toFixed(3)}) for query: "${query.slice(0, 50)}"`);
       }
     }
 
     if (matched.length === 0) {
-      console.log(`[ToolRegistry] No tools matched for: "${query.slice(0, 50)}" (best score below ${this.matchThreshold})`);
+      console.log(`[ToolRegistry] No tools above threshold ${this.matchThreshold} for: "${query.slice(0, 50)}" (best raw: ${maxScore.toFixed(3)})`);
     }
 
     return matched;
