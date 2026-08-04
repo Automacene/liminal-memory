@@ -88,6 +88,86 @@ export class Compaction {
   }
 
   /**
+   * Trim keeping only a specified range. Archives everything OUTSIDE the range.
+   * Nodes before keepStart get archived as one block, nodes after keepEnd as another.
+   * 
+   * @param {number} keepStartId - first node to KEEP (everything before this is archived)
+   * @param {number} keepEndId - last node to KEEP (everything after this is archived)
+   * @param {object} [beforeSummary] - summary for the before-block
+   * @param {object} [afterSummary] - summary for the after-block
+   * @returns {{ before: object|null, after: object|null }} compaction markers created
+   */
+  async trimKeepRange(keepStartId, keepEndId, beforeSummary = null, afterSummary = null) {
+    const allNodes = this.chain.all();
+    if (allNodes.length === 0) return { before: null, after: null };
+
+    const firstId = allNodes[0].id;
+    const lastId = allNodes[allNodes.length - 1].id;
+
+    let beforeMarker = null;
+    let afterMarker = null;
+
+    // Archive everything BEFORE the keep range
+    if (keepStartId > firstId) {
+      const beforeNodes = this.chain.range(firstId, keepStartId - 1);
+      if (beforeNodes.length > 0) {
+        const summary = beforeSummary || {
+          startTopic: (beforeNodes[0].query || beforeNodes[0].content || "").slice(0, 80),
+          keyDecisions: [],
+          openThreads: []
+        };
+        beforeMarker = await this.trim(firstId, beforeNodes[beforeNodes.length - 1].id, summary);
+      }
+    }
+
+    // Archive everything AFTER the keep range
+    // Re-fetch allNodes since trim modified the chain
+    const remainingNodes = this.chain.all();
+    const nodesAfter = remainingNodes.filter(n => n.id > keepEndId && n.role !== "compaction");
+    if (nodesAfter.length > 0) {
+      const afterStartId = nodesAfter[0].id;
+      const afterEndId = nodesAfter[nodesAfter.length - 1].id;
+      const summary = afterSummary || {
+        startTopic: (nodesAfter[0].query || nodesAfter[0].content || "").slice(0, 80),
+        keyDecisions: [],
+        openThreads: []
+      };
+      afterMarker = await this.trim(afterStartId, afterEndId, summary);
+    }
+
+    return { before: beforeMarker, after: afterMarker };
+  }
+
+  /**
+   * Branch from a specific node. Archives everything BEFORE that node.
+   * The selected node and everything after it remains as the active session.
+   * 
+   * @param {number} fromNodeId - the node to branch from (this node stays)
+   * @param {object} [summary] - summary for the archived block
+   * @returns {object|null} compaction marker, or null if nothing to archive
+   */
+  async branchFrom(fromNodeId, summary = null) {
+    const allNodes = this.chain.all();
+    if (allNodes.length === 0) return null;
+
+    const firstId = allNodes[0].id;
+
+    // Nothing to archive if we're branching from the first node
+    if (fromNodeId <= firstId) return null;
+
+    const beforeNodes = this.chain.range(firstId, fromNodeId - 1);
+    if (beforeNodes.length === 0) return null;
+
+    const archiveSummary = summary || {
+      startTopic: (beforeNodes[0].query || beforeNodes[0].content || "").slice(0, 80),
+      keyDecisions: [],
+      openThreads: []
+    };
+
+    return this.trim(firstId, beforeNodes[beforeNodes.length - 1].id, archiveSummary);
+  }
+
+  /**
    * Trim everything before the current sliding window.
    * @param {number} windowSize
    * @param {object} summary

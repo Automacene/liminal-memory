@@ -132,6 +132,13 @@
       </div>
     </div>
 
+    <!-- Right-side context info (shown during selection modes) -->
+    <div class="context-info" id="context-info">
+      <div class="context-info__mode" id="context-mode"></div>
+      <div class="context-info__message" id="context-message"></div>
+      <div class="context-info__selection" id="context-selection" style="display:none;"></div>
+    </div>
+
     <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar__brand">
@@ -246,6 +253,7 @@
   <!-- ============================================================
        SCRIPTS — Load order: library → canvas → components → app
   ============================================================ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/lib/marked.umd.min.js"></script>
   <script src="../dist/luminal-memory.umd.js"></script>
   <script type="module">
     // Load the test fixture as a module and expose as global
@@ -262,6 +270,7 @@
   <script src="ui/js/components/search-modal.js"></script>
   <script src="ui/js/components/inspect-modal.js"></script>
   <script src="ui/js/components/status-modal.js"></script>
+  <script src="ui/js/components/selection-mode.js"></script>
   <script src="ui/js/app.js"></script>
 </body>
 </html>

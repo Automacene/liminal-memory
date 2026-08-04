@@ -20,6 +20,7 @@
 @import url('./organisms/toolbar.css');
 @import url('./organisms/canvas.css');
 @import url('./organisms/sidebar-stats.css');
+@import url('./organisms/selection-mode.css');
 
 /* Templates */
 @import url('./templates/layout.css');

@@ -14,6 +14,7 @@ const Chat = (function () {
     const wrapper = document.createElement('div');
     wrapper.className = 'message message--' + role;
     if (animate === false) wrapper.style.animation = 'none';
+    if (nodeId) wrapper.dataset.nodeId = nodeId;
 
     // Sender label
     const sender = document.createElement('div');
@@ -50,8 +51,14 @@ const Chat = (function () {
     }
 
     // Content
-    const contentEl = document.createElement('span');
-    contentEl.textContent = content;
+    const contentEl = document.createElement('div');
+    if (role === 'assistant' && typeof marked !== 'undefined') {
+      contentEl.className = 'message__content markdown';
+      contentEl.innerHTML = marked.marked(content);
+    } else {
+      contentEl.className = 'message__content';
+      contentEl.textContent = content;
+    }
     body.appendChild(contentEl);
 
     wrapper.appendChild(sender);
@@ -94,5 +101,83 @@ const Chat = (function () {
     if (streamEl) streamEl.innerHTML = '';
   }
 
-  return { init, renderMessage, renderSystem, renderRecall, renderWindowBoundary, clear };
+  /**
+   * Remove messages outside a kept range (for trim) or before a node (for branch).
+   * @param {object} opts
+   * @param {number} [opts.keepStart] - first node ID to keep
+   * @param {number} [opts.keepEnd] - last node ID to keep
+   * @param {number} [opts.fromNodeId] - keep this node and after (branch)
+   */
+  function removeArchived(opts) {
+    if (!streamEl) return;
+    var messages = streamEl.querySelectorAll('.message[data-node-id]');
+    var keepStartEl = null;
+    var keepEndEl = null;
+    var branchFromEl = null;
+
+    messages.forEach(function (el) {
+      var id = parseInt(el.dataset.nodeId, 10);
+      if (!id && id !== 0) return;
+
+      var shouldRemove = false;
+      if (opts.keepStart !== undefined && opts.keepEnd !== undefined) {
+        shouldRemove = id < opts.keepStart || id > opts.keepEnd;
+        if (id === opts.keepStart) keepStartEl = el;
+        if (id === opts.keepEnd) keepEndEl = el;
+      } else if (opts.fromNodeId !== undefined) {
+        shouldRemove = id < opts.fromNodeId;
+        if (id === opts.fromNodeId) branchFromEl = el;
+      }
+
+      if (shouldRemove) {
+        el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        el.style.opacity = '0';
+        el.style.transform = 'translateX(-20px)';
+        setTimeout(function () { el.remove(); }, 300);
+      }
+    });
+
+    // Also remove the window boundary divider if it exists
+    var boundary = streamEl.querySelector('.window-boundary');
+    if (boundary) {
+      setTimeout(function () { boundary.remove(); }, 300);
+    }
+
+    // Insert informational markers after animations complete
+    setTimeout(function () {
+      if (opts.keepStart !== undefined && opts.keepEnd !== undefined) {
+        // Trim: marker before the first kept node and after the last
+        if (keepStartEl) {
+          var startMarker = createInfoMarker('\u25C0 Archived nodes before this point');
+          keepStartEl.parentNode.insertBefore(startMarker, keepStartEl);
+        }
+        if (keepEndEl) {
+          var endMarker = createInfoMarker('Archived nodes after this point \u25B6');
+          keepEndEl.parentNode.insertBefore(endMarker, keepEndEl.nextSibling);
+        }
+      } else if (opts.fromNodeId !== undefined) {
+        // Branch: marker before the branch point
+        if (branchFromEl) {
+          var branchMarker = createInfoMarker('\u25C0 Branch point — previous nodes archived');
+          branchFromEl.parentNode.insertBefore(branchMarker, branchFromEl);
+        }
+      }
+    }, 350);
+  }
+
+  function createInfoMarker(text) {
+    var el = document.createElement('div');
+    el.className = 'message message--system';
+    el.style.animation = 'fadeSlideIn 0.3s ease both';
+    var body = document.createElement('div');
+    body.className = 'message__body';
+    body.style.borderColor = 'var(--color-accent-border)';
+    body.style.background = 'var(--color-accent-bg)';
+    body.style.color = 'var(--color-accent)';
+    body.textContent = text;
+    el.appendChild(body);
+    return el;
+  }
+
+  return { init, renderMessage, renderSystem, renderRecall, renderWindowBoundary, removeArchived, clear };
 })();
