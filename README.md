@@ -1,17 +1,17 @@
-# Luminal Memory
+# Liminal Memory
 
-[![stars](https://img.shields.io/github/stars/automacene/luminal-memory?style=flat&color=gold)](https://github.com/automacene/luminal-memory/stargazers)
-[![forks](https://img.shields.io/github/forks/automacene/luminal-memory?style=flat&color=blue)](https://github.com/automacene/luminal-memory/network/members)
+[![stars](https://img.shields.io/github/stars/automacene/liminal-memory?style=flat&color=gold)](https://github.com/automacene/liminal-memory/stargazers)
+[![forks](https://img.shields.io/github/forks/automacene/liminal-memory?style=flat&color=blue)](https://github.com/automacene/liminal-memory/network/members)
 [![license](https://img.shields.io/badge/license-Apache%202.0-green)](./LICENSE)
 [![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)]()
 [![platform](https://img.shields.io/badge/platform-browser%20%7C%20node.js-blue)]()
 [![model-free](https://img.shields.io/badge/retrieval-no%20extra%20models-orange)]()
 
-## What is Luminal Memory?
+## What is Liminal Memory?
 
-Luminal Memory is a memory layer for AI models. It sits between your application and any LLM, giving the model the ability to remember unlimited conversation history — without adding more models, without embeddings, and without burning extra GPU.
+Liminal Memory is a memory layer for AI models. It sits between your application and any LLM, giving the model the ability to remember unlimited conversation history — without adding more models, without embeddings, and without burning extra GPU.
 
-Every AI model has a context window — a hard limit on how much text it can "see" at once. Once a conversation exceeds that limit, the model forgets everything before it. Luminal Memory solves this by managing what the model sees each turn. It stores the entire conversation, selects the most recent and most relevant messages, and rebuilds the prompt from scratch every single turn. The model is stateless. Luminal Memory is the memory.
+Every AI model has a context window — a hard limit on how much text it can "see" at once. Once a conversation exceeds that limit, the model forgets everything before it. Liminal Memory solves this by managing what the model sees each turn. It stores the entire conversation, selects the most recent and most relevant messages, and rebuilds the prompt from scratch every single turn. The model is stateless. Liminal Memory is the memory.
 
 It also gives models the ability to use tools — web search, date/time, or anything you build — discovered and invoked automatically when the conversation needs them.
 
@@ -19,7 +19,7 @@ Zero dependencies. Runs in any browser or Node.js environment. Works with any mo
 
 ## How It Works
 
-The core idea is simple: instead of letting the model accumulate context until it overflows, Luminal clears the slate every turn and reconstructs the prompt intelligently.
+The core idea is simple: instead of letting the model accumulate context until it overflows, Liminal clears the slate every turn and reconstructs the prompt intelligently.
 
 **The chain** — every message (user and AI) becomes a node in a linear chain stored in memory. Nothing is ever deleted from the chain unless you explicitly tell it to archive.
 
@@ -32,7 +32,7 @@ The core idea is simple: instead of letting the model accumulate context until i
 **Compaction** — when you're ready, you can archive old sections of the conversation to cold storage. They get compressed, summarized, and indexed so retrieval can still find them later.
 
 ```javascript
-const memory = new LuminalMemory({ endpoint: "http://127.0.0.1:8081" });
+const memory = new LiminalMemory({ endpoint: "http://127.0.0.1:8081" });
 await memory.init();
 
 const { response } = await memory.chat("How do bloom filters work?");
@@ -41,9 +41,9 @@ const { response } = await memory.chat("What did we discuss 200 messages ago?");
 // It finds it. Sub-millisecond.
 ```
 
-## Why Use Luminal Memory?
+## Why Use Liminal Memory?
 
-**No extra models.** Most "memory" solutions require embedding models, vector databases, or secondary neural networks. Luminal uses pure algorithmic search. Your primary LLM is the only model running.
+**No extra models.** Most "memory" solutions require embedding models, vector databases, or secondary neural networks. Liminal uses pure algorithmic search. Your primary LLM is the only model running.
 
 **No extra hardware.** It runs on whatever is already running your model. Consumer laptop, gaming PC, server — doesn't matter. The retrieval pipeline adds microseconds, not seconds.
 
@@ -67,7 +67,7 @@ const { response } = await memory.chat("What did we discuss 200 messages ago?");
 ## Get Started
 
 ```bash
-npm install @automacene/luminal-memory
+npm install @automacene/liminal-memory
 ```
 
 **Requirements:** Node.js 18+ (for native `fetch`) or any modern browser. If using CompressionStream for archive gzip, Chrome 80+, Firefox 113+, Safari 16.4+.
@@ -75,9 +75,9 @@ npm install @automacene/luminal-memory
 **CORS:** If your model server runs locally (llama.cpp, Ollama, etc.), make sure CORS is enabled. For llama-server: `llama-server --cors`. For Ollama: it's enabled by default. Without this, browser requests to your model will be blocked.
 
 ```javascript
-import { LuminalMemory, createWebSearchTool } from '@automacene/luminal-memory';
+import { LiminalMemory, createWebSearchTool } from '@automacene/liminal-memory';
 
-const memory = new LuminalMemory({
+const memory = new LiminalMemory({
   endpoint: "http://127.0.0.1:8081",  // your model server
   windowSize: 20                       // messages the AI sees per turn
 });
@@ -94,7 +94,7 @@ const { response, toolsUsed } = await memory.chat("What's new in Rust this week?
 Or load directly in the browser:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@automacene/luminal-memory@latest/dist/luminal-memory.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@automacene/liminal-memory@latest/dist/liminal-memory.min.js"></script>
 ```
 
 ## Tools
@@ -102,7 +102,7 @@ Or load directly in the browser:
 Tools are never pre-loaded into the prompt. They're discovered via keyword matching against their descriptions and only surface when relevant.
 
 ```javascript
-import { createWebSearchTool, createDateTimeTool, Tool } from '@automacene/luminal-memory';
+import { createWebSearchTool, createDateTimeTool, Tool } from '@automacene/liminal-memory';
 
 // Built-in extensions
 memory.registerTool(createWebSearchTool());  // Web search via Firecrawl (free, no key)
@@ -119,7 +119,7 @@ memory.registerTool(new Tool({
 
 ## Memory Management
 
-Luminal calls this **Trim & Branch** — not compaction in the traditional database sense.
+Liminal calls this **Trim & Branch** — not compaction in the traditional database sense.
 
 **What it is:** You select a section of conversation to keep as your active session. Everything outside that selection gets archived to cold storage (IndexedDB in browser, compressed on disk in Node). The archived blocks are compressed, indexed (Bloom filter + TF-IDF vector), and a summary marker is left in the chain so the AI has macro-awareness of what was archived.
 
@@ -140,7 +140,7 @@ Luminal calls this **Trim & Branch** — not compaction in the traditional datab
 
 **When NOT to trim:**
 - You're worried about RAM — you're not going to run out
-- Performance feels slow — the slowness is your LLM inference, not Luminal's retrieval
+- Performance feels slow — the slowness is your LLM inference, not Liminal's retrieval
 - You might reference that section again soon — just leave it, retrieval handles it
 
 ```javascript
@@ -173,8 +173,8 @@ const results = memory.search("that thing we discussed about authentication");
 A full interactive demo is included with the project. It loads a prebuilt conversation, connects to your local model, and lets you test memory retrieval, tool use, trim/branch, and search — all in the browser.
 
 ```bash
-git clone https://github.com/automacene/luminal-memory.git
-cd luminal-memory
+git clone https://github.com/automacene/liminal-memory.git
+cd liminal-memory
 npm install
 npm run build:umd
 node serve.js
@@ -204,7 +204,7 @@ Apache 2.0 © Automacene
 <summary>Full Configuration</summary>
 
 ```javascript
-const memory = new LuminalMemory({
+const memory = new LiminalMemory({
   endpoint: "http://127.0.0.1:8081",
   apiFormat: "openai",
   completionPath: "/v1/chat/completions",
