@@ -31,7 +31,7 @@ const Chat = (function () {
       const header = document.createElement('div');
       header.className = 'message__header';
       const pill1 = document.createElement('span');
-      pill1.className = 'wire-pill';
+      pill1.className = 'wire-pill wire-pill--accent';
       pill1.textContent = '[ RESPONSE ]';
       const pill2 = document.createElement('span');
       pill2.className = 'wire-pill';
@@ -43,7 +43,7 @@ const Chat = (function () {
       const header = document.createElement('div');
       header.className = 'message__header';
       const pill1 = document.createElement('span');
-      pill1.className = 'wire-pill';
+      pill1.className = 'wire-pill wire-pill--accent';
       pill1.textContent = '[ QUERY ]';
       header.appendChild(pill1);
       body.appendChild(header);
