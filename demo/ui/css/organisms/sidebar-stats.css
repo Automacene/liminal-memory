@@ -1,0 +1,45 @@
+/* =============================================================
+   ORGANISMS — Sidebar Stats (sci-fi terminal readout in whitespace)
+   Positioned in the whitespace flanking the chat area.
+============================================================= */
+
+.sidebar-stats {
+  position: fixed;
+  left: 12%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-app);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+  pointer-events: none;
+}
+
+.sidebar-stats__item {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sidebar-stats__value {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  letter-spacing: 0;
+}
+
+.sidebar-stats__value--accent {
+  color: var(--color-accent);
+}
+
+/* Hide on narrow screens where there's no whitespace */
+@media (max-width: 1100px) {
+  .sidebar-stats {
+    display: none;
+  }
+}

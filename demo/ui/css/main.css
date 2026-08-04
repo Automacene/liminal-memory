@@ -19,6 +19,7 @@
 @import url('./organisms/input.css');
 @import url('./organisms/toolbar.css');
 @import url('./organisms/canvas.css');
+@import url('./organisms/sidebar-stats.css');
 
 /* Templates */
 @import url('./templates/layout.css');

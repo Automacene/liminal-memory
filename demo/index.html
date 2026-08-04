@@ -108,6 +108,30 @@
   ============================================================ -->
   <div class="app">
 
+    <!-- Sidebar Stats (whitespace terminal readout) -->
+    <div class="sidebar-stats">
+      <div class="sidebar-stats__item">
+        <span>nodes</span>
+        <span class="sidebar-stats__value" id="side-nodes">0</span>
+      </div>
+      <div class="sidebar-stats__item">
+        <span>window</span>
+        <span class="sidebar-stats__value" id="side-window">0/20</span>
+      </div>
+      <div class="sidebar-stats__item">
+        <span>memory</span>
+        <span class="sidebar-stats__value" id="side-memory">0 MB</span>
+      </div>
+      <div class="sidebar-stats__item">
+        <span>archives</span>
+        <span class="sidebar-stats__value" id="side-archives">0</span>
+      </div>
+      <div class="sidebar-stats__item">
+        <span>status</span>
+        <span class="sidebar-stats__value sidebar-stats__value--accent" id="side-status">IDLE</span>
+      </div>
+    </div>
+
     <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar__brand">
@@ -119,9 +143,6 @@
       </div>
       <div class="topbar__status">
         <span><span class="topbar__dot" id="status-dot"></span> <span id="status-label">IDLE</span></span>
-        <span>Nodes: <strong id="stat-nodes">0</strong></span>
-        <span>Window: <strong id="stat-window">0</strong></span>
-        <span>Memory: <strong id="stat-memory">0 MB</strong></span>
       </div>
     </header>
 
@@ -133,9 +154,9 @@
         <button class="btn-control" id="btn-trim" title="Trim history before current window">✂ Trim</button>
         <button class="btn-control" id="btn-branch" title="Archive everything, start fresh">⌥ Branch</button>
         <span class="toolbar__divider"></span>
-        <button class="btn-control" id="btn-search" title="Search conversation history">⌕ Search</button>
-        <button class="btn-control" id="btn-inspect" title="Inspect memory state">◉ Inspect</button>
-        <button class="btn-control" id="btn-status" title="System status">⊡ Status</button>
+        <button class="btn-action" id="btn-search" title="Search conversation history">⌕ Search</button>
+        <button class="btn-action" id="btn-inspect" title="Inspect memory state">◉ Inspect</button>
+        <button class="btn-action" id="btn-status" title="System status">⊡ Status</button>
       </div>
 
       <!-- Chat Area -->
@@ -165,6 +186,22 @@
   <!-- ============================================================
        MODALS
   ============================================================ -->
+
+  <!-- Modal: Confirm (for Trim/Branch) -->
+  <div class="modal-backdrop" id="modal-confirm-backdrop"></div>
+  <div class="modal" id="modal-confirm" style="max-width:420px;">
+    <div class="modal__header">
+      <span class="modal__title" id="confirm-title">Confirm</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-confirm-close">✕</button>
+    </div>
+    <div class="modal__body">
+      <p id="confirm-message" style="line-height:1.6; color:var(--color-text-secondary);"></p>
+    </div>
+    <div class="modal__footer">
+      <button class="btn-control" id="confirm-cancel">Cancel</button>
+      <button class="btn-primary" id="confirm-proceed">Proceed</button>
+    </div>
+  </div>
 
   <!-- Modal: Search -->
   <div class="modal-backdrop" id="modal-search-backdrop"></div>

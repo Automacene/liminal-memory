@@ -92,8 +92,12 @@
       }
     }
 
-    // Render preloaded messages
+    // Render preloaded messages with window boundary
+    var windowStart = conversation.length - (CONFIG.windowSize * 2); // windowSize turns = 2x messages
     for (var j = 0; j < conversation.length; j++) {
+      if (j === windowStart) {
+        Chat.renderWindowBoundary();
+      }
       Chat.renderMessage(conversation[j].role, conversation[j].content, Math.ceil((j + 1) / 2), false);
     }
 
@@ -194,67 +198,103 @@
     refreshStats();
   }
 
-  // === Trim ===
-  async function handleTrim() {
-    if (!ready) return;
-    try {
-      var windowNodes = memory.getWindow();
-      var allNodes = memory.chain.all();
-      var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
-      var nodesToTrim = allNodes.filter(function (n) { return !windowIds.has(n.id); });
+  // === Confirm modal helper ===
+  function confirm(title, message, onProceed) {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    Modal.open('confirm');
 
-      if (nodesToTrim.length === 0) {
-        Chat.renderSystem('Nothing to trim \u2014 history is smaller than window size.');
-        return;
-      }
+    var proceedBtn = document.getElementById('confirm-proceed');
+    var cancelBtn = document.getElementById('confirm-cancel');
 
-      var summary = {
-        startTopic: (nodesToTrim[0].query || nodesToTrim[0].content || '').slice(0, 80),
-        keyDecisions: ['Trimmed via UI'],
-        openThreads: []
-      };
-
-      var result = await memory.trimFromHere(summary);
-      if (result) {
-        Chat.renderSystem('\u2702\uFE0F Trimmed ' + nodesToTrim.length + ' nodes to archive. Compaction marker inserted.');
-      }
-    } catch (err) {
-      Chat.renderSystem('\u274C Trim failed: ' + err.message);
+    function cleanup() {
+      proceedBtn.removeEventListener('click', onYes);
+      cancelBtn.removeEventListener('click', onNo);
     }
-    refreshStats();
+    function onYes() { cleanup(); Modal.close('confirm'); onProceed(); }
+    function onNo() { cleanup(); Modal.close('confirm'); }
+
+    proceedBtn.addEventListener('click', onYes);
+    cancelBtn.addEventListener('click', onNo);
+  }
+
+  // === Trim ===
+  function handleTrim() {
+    if (!ready) return;
+
+    var windowNodes = memory.getWindow();
+    var allNodes = memory.chain.all();
+    var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
+    var nodesToTrim = allNodes.filter(function (n) { return !windowIds.has(n.id); });
+
+    if (nodesToTrim.length === 0) {
+      Chat.renderSystem('Nothing to trim \u2014 history is smaller than window size.');
+      return;
+    }
+
+    confirm(
+      'Trim History',
+      'This will archive ' + nodesToTrim.length + ' nodes that are outside the current window to cold storage. They can be restored later. Proceed?',
+      async function () {
+        try {
+          var summary = {
+            startTopic: (nodesToTrim[0].query || nodesToTrim[0].content || '').slice(0, 80),
+            keyDecisions: ['Trimmed via UI'],
+            openThreads: []
+          };
+
+          var result = await memory.trimFromHere(summary);
+          if (result) {
+            Chat.renderSystem('\u2702\uFE0F Trimmed ' + nodesToTrim.length + ' nodes to archive. Compaction marker inserted.');
+          }
+        } catch (err) {
+          Chat.renderSystem('\u274C Trim failed: ' + err.message);
+        }
+        refreshStats();
+      }
+    );
   }
 
   // === Branch ===
-  async function handleBranch() {
+  function handleBranch() {
     if (!ready) return;
-    try {
-      var allNodes = memory.chain.all();
-      if (allNodes.length === 0) {
-        Chat.renderSystem('Nothing to branch \u2014 no history.');
-        return;
-      }
 
-      var summary = {
-        startTopic: (allNodes[0].query || allNodes[0].content || '').slice(0, 80),
-        keyDecisions: ['Branched via UI'],
-        openThreads: []
-      };
-
-      var key = await memory.branch(summary);
-      if (key) {
-        Chat.renderSystem('\u2325 Branched. Archived as: ' + key);
-        Chat.clear();
-      }
-    } catch (err) {
-      Chat.renderSystem('\u274C Branch failed: ' + err.message);
+    var allNodes = memory.chain.all();
+    if (allNodes.length === 0) {
+      Chat.renderSystem('Nothing to branch \u2014 no history.');
+      return;
     }
-    refreshStats();
+
+    confirm(
+      'Branch Session',
+      'This will archive all ' + allNodes.length + ' nodes and start a fresh session. The current conversation will be moved to cold storage. Proceed?',
+      async function () {
+        try {
+          var summary = {
+            startTopic: (allNodes[0].query || allNodes[0].content || '').slice(0, 80),
+            keyDecisions: ['Branched via UI'],
+            openThreads: []
+          };
+
+          var key = await memory.branch(summary);
+          if (key) {
+            Chat.renderSystem('\u2325 Branched. Archived as: ' + key);
+            Chat.clear();
+          }
+        } catch (err) {
+          Chat.renderSystem('\u274C Branch failed: ' + err.message);
+        }
+        refreshStats();
+      }
+    );
   }
 
-  // === Refresh stats in topbar ===
+  // === Refresh stats in topbar + sidebar ===
   function refreshStats() {
     var s = memory.status();
     Topbar.updateStats(s.totalNodes, memory.getWindow().length, s.memoryUsageMB);
+    var sideArchives = document.getElementById('side-archives');
+    if (sideArchives) sideArchives.textContent = s.archiveBlocks;
   }
 
   // Boot is triggered by fixture-ready event above

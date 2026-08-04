@@ -81,9 +81,18 @@ const Chat = (function () {
     streamEl.scrollTop = streamEl.scrollHeight;
   }
 
+  function renderWindowBoundary() {
+    if (!streamEl) return;
+    const el = document.createElement('div');
+    el.className = 'window-boundary';
+    el.innerHTML = '<div class="window-boundary__line"></div>' +
+      '<span class="window-boundary__label">end of ai window</span>';
+    streamEl.appendChild(el);
+  }
+
   function clear() {
     if (streamEl) streamEl.innerHTML = '';
   }
 
-  return { init, renderMessage, renderSystem, renderRecall, clear };
+  return { init, renderMessage, renderSystem, renderRecall, renderWindowBoundary, clear };
 })();
