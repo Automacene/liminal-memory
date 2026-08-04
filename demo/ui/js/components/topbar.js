@@ -18,14 +18,16 @@ const Topbar = (function () {
     if (sideStatus) sideStatus.textContent = label;
   }
 
-  function updateStats(nodes, windowCount, memoryMB) {
+  function updateStats(nodes, windowCount, memoryMB, totalTokens) {
     // Update sidebar stats
     var sideNodes = document.getElementById('side-nodes');
     var sideWindow = document.getElementById('side-window');
     var sideMemory = document.getElementById('side-memory');
+    var sideTokens = document.getElementById('side-tokens');
     if (sideNodes) sideNodes.textContent = nodes;
-    if (sideWindow) sideWindow.textContent = windowCount + '/20';
+    if (sideWindow) sideWindow.textContent = windowCount + '/40';
     if (sideMemory) sideMemory.textContent = memoryMB + ' / 2048 MB';
+    if (sideTokens) sideTokens.textContent = totalTokens ? totalTokens.toLocaleString() : '0';
   }
 
   return { init, setStatus, updateStats };

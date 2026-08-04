@@ -53,8 +53,15 @@ export class MemoryManager {
    * @returns {object}
    */
   status() {
+    // Calculate total tokens across all nodes in the chain
+    let totalTokens = 0;
+    for (const node of this.chain.all()) {
+      totalTokens += node.tokenCount || 0;
+    }
+
     return {
       totalNodes: this.chain.length,
+      totalTokens: totalTokens,
       memoryUsageMB: Math.round(this.usageMB * 100) / 100,
       utilizationPercent: Math.round(this.utilization * 100),
       limitMB: this.config.memoryLimitMB,
