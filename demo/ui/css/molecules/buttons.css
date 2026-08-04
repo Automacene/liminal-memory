@@ -81,6 +81,27 @@
   border-color: var(--color-accent-border);
 }
 
+/* ---- Action Button (search, inspect, status — orange filled) ---- */
+.btn-action {
+  padding: var(--space-6) var(--space-12);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: #ffffff;
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.btn-action:hover {
+  background: var(--color-accent-bright);
+  border-color: var(--color-accent-bright);
+  transform: translateY(-1px);
+}
+
 /* ---- Primary Button ---- */
 .btn-primary {
   padding: var(--space-8) var(--space-16);
