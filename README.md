@@ -6,6 +6,8 @@
 [![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)]()
 [![platform](https://img.shields.io/badge/platform-browser%20%7C%20node.js-blue)]()
 [![model-free](https://img.shields.io/badge/retrieval-no%20extra%20models-orange)]()
+[![GitHub Repo stars](https://img.shields.io/github/stars/Automacene/liminal-memory?style=social)](https://github.com/Automacene/liminal-memory/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/Automacene/liminal-memory?style=social)](https://github.com/Automacene/liminal-memory/network/members)
 
 ## What is Liminal Memory?
 
