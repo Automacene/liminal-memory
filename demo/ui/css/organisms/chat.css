@@ -21,8 +21,21 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  width: 100%;
+  width: 85%;
   animation: fadeSlideIn var(--transition-slow) ease both;
+}
+
+.message--user {
+  align-self: flex-start;
+}
+
+.message--assistant {
+  align-self: flex-end;
+}
+
+.message--system {
+  align-self: center;
+  width: 70%;
 }
 
 @keyframes fadeSlideIn {
