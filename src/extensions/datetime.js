@@ -11,7 +11,7 @@ import { Tool } from "../tools/base.js";
 export function createDateTimeTool() {
   return new Tool({
     name: "datetime",
-    description: "Get the current date, time, day of week, or timezone. Use when the user asks what day it is, what time it is, the current date, or anything related to today's date or time.",
+    description: "Get the current date, time, day of week, or timezone. Use when the user asks what day it is, what time it is, the current date, or anything related to today's date or time. [Synonyms: today, now, what day, what time, current date, current time, right now, clock, calendar, timezone, what year]",
     parameters: {
       type: "object",
       properties: {

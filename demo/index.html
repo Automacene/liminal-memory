@@ -257,9 +257,9 @@
   <script src="ui/js/vendor/gifuct.js"></script>
   <script src="../dist/luminal-memory.umd.js"></script>
   <script type="module">
-    // Load the test fixture as a module and expose as global
-    import { conversation35 } from '../tests/fixtures/conversation-35.js';
-    window.conversation35 = conversation35;
+    // Load the demo knowledge base fixture and expose as global
+    import { demoConversation } from './fixtures/knowledge-base.js';
+    window.conversation35 = demoConversation;
     window.dispatchEvent(new Event('fixture-ready'));
   </script>
   <script src="ui/js/canvas.js"></script>
