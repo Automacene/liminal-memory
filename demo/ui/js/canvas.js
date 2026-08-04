@@ -1,205 +1,244 @@
 /**
- * Geometric Canvas — animated abstract tech shapes.
- * Slowly rotating/morphing polygons, floating nodes, connection lines.
- * Subtle, non-distracting background layer.
+ * Background Canvas — GIF-masked ASCII field + morphing shapes.
+ * 
+ * Uses gifuct-js to decode the gif frame by frame, then samples each frame
+ * as a brightness mask to determine where ASCII characters appear.
+ * 
+ * Exposes Canvas.pulse() for recall effects.
  */
+var Canvas = (function () {
+  var canvas = document.getElementById('geo-canvas');
+  var ctx = canvas.getContext('2d');
 
-const canvas = document.getElementById('geo-canvas');
-const ctx = canvas.getContext('2d');
+  // Frame-by-frame gif playback
+  var frames = [];       // decoded frames from gifuct-js
+  var frameIdx = 0;
+  var frameTimer = 0;
+  var frameDelay = 100;  // ms per frame (updated from gif data)
+  var lastFrameTime = 0;
 
-let width, height;
-let shapes = [];
-let particles = [];
-let connections = [];
-let time = 0;
+  // Offscreen canvas for compositing gif frames
+  var gifCanvas = document.createElement('canvas');
+  var gifCtx = gifCanvas.getContext('2d');
 
-const ACCENT = { r: 255, g: 69, b: 0 };
-const GREY = { r: 180, g: 180, b: 180 };
+  // Mask sampling canvas (small for performance)
+  var maskCanvas = document.createElement('canvas');
+  var maskCtx = maskCanvas.getContext('2d');
 
-function resize() {
-  width = canvas.width = window.innerWidth;
-  height = canvas.height = window.innerHeight;
-  initShapes();
-}
+  var width, height;
+  var time = 0;
+  var pulseIntensity = 0;
+  var gifReady = false;
 
-function initShapes() {
-  shapes = [];
-  particles = [];
+  // ASCII config
+  var asciiChars = [' ', '.', '`', ',', ':', ';', '~', '+', '=', 'i', 'l', 'x', 'z', 'X', 'Y', '*', 'S', '%', '#', '&', '@'];
+  var stepX = 12;
+  var stepY = 14;
+  var cols = 0;
+  var rows = 0;
 
-  // Floating geometric shapes (hexagons, triangles, squares)
-  const shapeCount = Math.floor((width * height) / 200000) + 4;
-  for (let i = 0; i < shapeCount; i++) {
-    shapes.push({
-      x: Math.random() * width,
-      y: Math.random() * height,
-      size: 20 + Math.random() * 60,
-      sides: [3, 4, 5, 6, 8][Math.floor(Math.random() * 5)],
-      rotation: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.003,
-      driftX: (Math.random() - 0.5) * 0.15,
-      driftY: (Math.random() - 0.5) * 0.1,
-      opacity: 0.04 + Math.random() * 0.06,
-      isAccent: Math.random() < 0.25,
-      pulsePhase: Math.random() * Math.PI * 2,
-      morphPhase: Math.random() * Math.PI * 2,
-      morphSpeed: 0.001 + Math.random() * 0.002
-    });
+  // Morphing shapes
+  var shapes = [];
+  var SHAPE_COUNT = 4;
+
+  var GREY = { r: 150, g: 150, b: 150 };
+  var ACCENT = { r: 255, g: 69, b: 0 };
+
+  // === Load and decode GIF with gifuct-js (global: window.gifuct) ===
+  function loadGif() {
+    fetch('ui/assets/bg.gif')
+      .then(function (resp) { return resp.arrayBuffer(); })
+      .then(function (buff) {
+        var gif = gifuct.parseGIF(buff);
+        frames = gifuct.decompressFrames(gif, true);
+        if (frames.length > 0) {
+          gifCanvas.width = frames[0].dims.width;
+          gifCanvas.height = frames[0].dims.height;
+          gifReady = true;
+          console.log('[Canvas] GIF loaded: ' + frames.length + ' frames');
+        }
+      })
+      .catch(function (err) {
+        console.warn('[Canvas] Failed to load gif:', err);
+      });
   }
 
-  // Small floating particles (dots / nodes)
-  const particleCount = Math.floor((width * height) / 80000) + 8;
-  for (let i = 0; i < particleCount; i++) {
-    particles.push({
-      x: Math.random() * width,
-      y: Math.random() * height,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.2,
-      size: 2 + Math.random() * 3,
-      opacity: 0.1 + Math.random() * 0.2,
-      isAccent: Math.random() < 0.2,
-      pulse: Math.random() * Math.PI * 2
-    });
+  function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+    maskCanvas.width = Math.ceil(width / 4);
+    maskCanvas.height = Math.ceil(height / 4);
+    cols = Math.ceil(width / stepX);
+    rows = Math.ceil(height / stepY);
+    initShapes();
   }
-}
 
-function drawPolygon(x, y, size, sides, rotation, morph) {
-  ctx.beginPath();
-  for (let i = 0; i <= sides; i++) {
-    const angle = (i / sides) * Math.PI * 2 + rotation;
-    // Morph: alternate vertices push in/out slightly
-    const r = size + Math.sin(angle * 2 + morph) * size * 0.1;
-    const px = x + Math.cos(angle) * r;
-    const py = y + Math.sin(angle) * r;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+  // === Render current gif frame to the gifCanvas, then scale to maskCanvas ===
+  function updateMask(timestamp) {
+    if (!gifReady || frames.length === 0) return null;
+
+    // Advance frame based on delay
+    if (timestamp - lastFrameTime > frameDelay) {
+      frameIdx = (frameIdx + 1) % frames.length;
+      lastFrameTime = timestamp;
+      frameDelay = frames[frameIdx].delay || 100;
+
+      // Draw the frame patch onto the gif canvas
+      var frame = frames[frameIdx];
+      var dims = frame.dims;
+      var imageData = new ImageData(frame.patch, dims.width, dims.height);
+
+      // Handle disposal (simplified: just draw over)
+      if (frame.disposalType === 2) {
+        gifCtx.clearRect(0, 0, gifCanvas.width, gifCanvas.height);
+      }
+      
+      // Create temp canvas for this frame's patch
+      var tempCanvas = document.createElement('canvas');
+      tempCanvas.width = dims.width;
+      tempCanvas.height = dims.height;
+      var tempCtx = tempCanvas.getContext('2d');
+      tempCtx.putImageData(imageData, 0, 0);
+      
+      gifCtx.drawImage(tempCanvas, dims.left, dims.top);
+    }
+
+    // Scale gif frame down to mask canvas
+    maskCtx.drawImage(gifCanvas, 0, 0, maskCanvas.width, maskCanvas.height);
+    return maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
   }
-  ctx.closePath();
-}
 
-function drawShapes() {
-  for (const s of shapes) {
-    // Drift
+  // === Draw ASCII where mask is bright ===
+  function drawAscii(maskData) {
+    if (!maskData) return;
+
+    ctx.font = '11px "SF Mono", Consolas, monospace';
+
+    var mw = maskCanvas.width;
+    var scaleX = mw / width;
+    var scaleY = maskCanvas.height / height;
+
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var x = c * stepX;
+        var y = r * stepY;
+
+        var mx = Math.floor(x * scaleX);
+        var my = Math.floor(y * scaleY);
+        var idx = (my * mw + mx) * 4;
+
+        var red = maskData[idx];
+        var green = maskData[idx + 1];
+        var blue = maskData[idx + 2];
+        var brightness = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+
+        if (brightness < 0.1) continue;
+
+        var charIdx = Math.floor(brightness * (asciiChars.length - 1));
+        var char = asciiChars[Math.min(charIdx, asciiChars.length - 1)];
+        if (char === ' ') continue;
+
+        var alpha = brightness * 0.35;
+        ctx.fillStyle = 'rgba(' + GREY.r + ',' + GREY.g + ',' + GREY.b + ',' + alpha + ')';
+        ctx.fillText(char, x, y);
+      }
+    }
+  }
+
+  // === Morphing Shapes ===
+  function initShapes() {
+    shapes = [];
+    for (var i = 0; i < SHAPE_COUNT; i++) {
+      shapes.push({
+        x: width * 0.15 + Math.random() * width * 0.7,
+        y: height * 0.15 + Math.random() * height * 0.7,
+        size: 25 + Math.random() * 40,
+        currentSides: 3 + Math.floor(Math.random() * 5),
+        targetSides: 3 + Math.floor(Math.random() * 5),
+        morphProgress: 0,
+        morphSpeed: 0.002 + Math.random() * 0.002,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.0015,
+        driftX: (Math.random() - 0.5) * 0.1,
+        driftY: (Math.random() - 0.5) * 0.06,
+        opacity: 0.05 + Math.random() * 0.04
+      });
+    }
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function drawMorphingShape(s) {
+    var speed = s.morphSpeed;
+    if (pulseIntensity > 0) speed *= 1 + pulseIntensity * 3;
+    s.morphProgress += speed;
+
+    if (s.morphProgress >= 1) {
+      s.morphProgress = 0;
+      s.currentSides = s.targetSides;
+      s.targetSides = 3 + Math.floor(Math.random() * 6);
+    }
+
     s.x += s.driftX;
     s.y += s.driftY;
     s.rotation += s.rotSpeed;
-    s.morphPhase += s.morphSpeed;
 
-    // Wrap around screen
     if (s.x < -s.size * 2) s.x = width + s.size;
     if (s.x > width + s.size * 2) s.x = -s.size;
     if (s.y < -s.size * 2) s.y = height + s.size;
     if (s.y > height + s.size * 2) s.y = -s.size;
 
-    // Pulse opacity
-    const pulse = Math.sin(time * 0.001 + s.pulsePhase) * 0.02;
-    const alpha = s.opacity + pulse;
+    var maxVerts = Math.max(s.currentSides, s.targetSides);
+    var p = s.morphProgress;
+    var ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
 
-    const color = s.isAccent ? ACCENT : GREY;
-    ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+    ctx.beginPath();
+    for (var i = 0; i < maxVerts; i++) {
+      var a1 = (i / s.currentSides) * Math.PI * 2 + s.rotation;
+      var a2 = (i / s.targetSides) * Math.PI * 2 + s.rotation;
+      var px = lerp(s.x + Math.cos(a1) * s.size, s.x + Math.cos(a2) * s.size, ease);
+      var py = lerp(s.y + Math.sin(a1) * s.size, s.y + Math.sin(a2) * s.size, ease);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    ctx.strokeStyle = 'rgba(' + GREY.r + ',' + GREY.g + ',' + GREY.b + ',' + s.opacity + ')';
     ctx.lineWidth = 1;
-
-    drawPolygon(s.x, s.y, s.size, s.sides, s.rotation, s.morphPhase);
     ctx.stroke();
+  }
 
-    // Some shapes get a very faint fill
-    if (s.isAccent) {
-      ctx.fillStyle = `rgba(${ACCENT.r}, ${ACCENT.g}, ${ACCENT.b}, ${alpha * 0.3})`;
-      ctx.fill();
+  function drawShapes() {
+    for (var i = 0; i < shapes.length; i++) {
+      drawMorphingShape(shapes[i]);
     }
   }
-}
 
-function drawParticles() {
-  for (const p of particles) {
-    p.x += p.vx;
-    p.y += p.vy;
-    p.pulse += 0.02;
+  // === Main Loop ===
+  function animate(timestamp) {
+    time = timestamp;
+    ctx.clearRect(0, 0, width, height);
 
-    // Wrap
-    if (p.x < 0) p.x = width;
-    if (p.x > width) p.x = 0;
-    if (p.y < 0) p.y = height;
-    if (p.y > height) p.y = 0;
-
-    const pulseSize = p.size + Math.sin(p.pulse) * 1;
-    const alpha = p.opacity + Math.sin(p.pulse) * 0.05;
-    const color = p.isAccent ? ACCENT : GREY;
-
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, pulseSize, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
-    ctx.fill();
-  }
-}
-
-function drawConnections() {
-  const maxDist = 150;
-  ctx.lineWidth = 0.5;
-
-  for (let i = 0; i < particles.length; i++) {
-    for (let j = i + 1; j < particles.length; j++) {
-      const dx = particles[i].x - particles[j].x;
-      const dy = particles[i].y - particles[j].y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist < maxDist) {
-        const alpha = (1 - dist / maxDist) * 0.06;
-        const isAccentLine = particles[i].isAccent || particles[j].isAccent;
-        const color = isAccentLine ? ACCENT : GREY;
-        ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
-        ctx.beginPath();
-        ctx.moveTo(particles[i].x, particles[i].y);
-        ctx.lineTo(particles[j].x, particles[j].y);
-        ctx.stroke();
-      }
+    if (pulseIntensity > 0) {
+      pulseIntensity -= 0.008;
+      if (pulseIntensity < 0) pulseIntensity = 0;
     }
+
+    var maskData = updateMask(timestamp);
+    drawAscii(maskData);
+    drawShapes();
+
+    requestAnimationFrame(animate);
   }
-}
 
-function drawCrosshairs() {
-  // Subtle crosshair markers at a few random positions (like schematic reference points)
-  const markers = [
-    { x: width * 0.15, y: height * 0.2 },
-    { x: width * 0.85, y: height * 0.15 },
-    { x: width * 0.1, y: height * 0.75 },
-    { x: width * 0.9, y: height * 0.8 },
-  ];
-
-  ctx.lineWidth = 0.5;
-  const alpha = 0.08 + Math.sin(time * 0.0008) * 0.03;
-  ctx.strokeStyle = `rgba(${GREY.r}, ${GREY.g}, ${GREY.b}, ${alpha})`;
-
-  for (const m of markers) {
-    const size = 8;
-    // Horizontal
-    ctx.beginPath();
-    ctx.moveTo(m.x - size, m.y);
-    ctx.lineTo(m.x + size, m.y);
-    ctx.stroke();
-    // Vertical
-    ctx.beginPath();
-    ctx.moveTo(m.x, m.y - size);
-    ctx.lineTo(m.x, m.y + size);
-    ctx.stroke();
-    // Circle
-    ctx.beginPath();
-    ctx.arc(m.x, m.y, size * 0.6, 0, Math.PI * 2);
-    ctx.stroke();
+  function pulse() {
+    pulseIntensity = 1.0;
   }
-}
 
-function animate(timestamp) {
-  time = timestamp;
-  ctx.clearRect(0, 0, width, height);
-
-  drawConnections();
-  drawShapes();
-  drawParticles();
-  drawCrosshairs();
-
+  // === Init ===
+  window.addEventListener('resize', resize);
+  resize();
+  loadGif();
   requestAnimationFrame(animate);
-}
 
-window.addEventListener('resize', resize);
-resize();
-requestAnimationFrame(animate);
+  return { pulse: pulse };
+})();

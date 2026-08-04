@@ -111,6 +111,7 @@
 
     // Init components that need memory ref
     SelectionMode.init();
+    RecallFX.init();
     SearchModal.init(memory);
     InspectModal.init(memory);
     StatusModal.init(memory);
@@ -165,6 +166,7 @@
 
       if (recallNodes.length > 0) {
         Chat.renderRecall(recallNodes.length);
+        RecallFX.fire(recallNodes);
         console.log('[Recall] ' + recallNodes.length + ' nodes from outside window');
       }
 

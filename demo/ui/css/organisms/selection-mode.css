@@ -66,6 +66,19 @@
   }
 }
 
+/* Ghost node flicker animation (recall FX) */
+@keyframes ghostFlicker {
+  0% { opacity: 0; transform: translateX(10px); }
+  5% { opacity: 0.8; }
+  10% { opacity: 0.2; }
+  15% { opacity: 0.9; }
+  20% { opacity: 0.4; }
+  25% { opacity: 1; transform: translateX(0); }
+  70% { opacity: 0.8; }
+  85% { opacity: 0.6; }
+  100% { opacity: 0; transform: translateX(-5px); }
+}
+
 /* ---- Right-side contextual info panel ---- */
 .context-info {
   position: fixed;
