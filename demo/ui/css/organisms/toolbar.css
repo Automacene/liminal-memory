@@ -11,6 +11,7 @@
   gap: var(--space-8);
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
 }
 
 .toolbar__divider {
