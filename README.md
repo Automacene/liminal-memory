@@ -7,313 +7,286 @@
 [![platform](https://img.shields.io/badge/platform-browser%20%7C%20node.js-blue)]()
 [![model-free](https://img.shields.io/badge/retrieval-no%20extra%20models-orange)]()
 
-Zero-dependency infinite context memory for any LLM. Runs in browser and Node.js.
+## What is Luminal Memory?
 
-Give any local model — even a small one — persistent conversation memory without adding extra models or burning extra GPU. The LLM is stateless. Luminal Memory *is* the memory.
+Luminal Memory is a memory layer for AI models. It sits between your application and any LLM, giving the model the ability to remember unlimited conversation history — without adding more models, without embeddings, and without burning extra GPU.
 
-## What It Does
+Every AI model has a context window — a hard limit on how much text it can "see" at once. Once a conversation exceeds that limit, the model forgets everything before it. Luminal Memory solves this by managing what the model sees each turn. It stores the entire conversation, selects the most recent and most relevant messages, and rebuilds the prompt from scratch every single turn. The model is stateless. Luminal Memory is the memory.
 
-Every LLM has a fixed context window. Once a conversation exceeds it, the model forgets. Luminal Memory solves this by:
+It also gives models the ability to use tools — web search, date/time, or anything you build — discovered and invoked automatically when the conversation needs them.
 
-- Storing every conversation turn in RAM as a linear chain of nodes
-- Rebuilding the LLM's context from scratch each turn using a sliding window of recent messages
-- Retrieving relevant historical context using pure-math algorithms (BM25, Bloom filters, TF-IDF) when you reference something outside the window — no embedding models, no vector databases, no extra inference
+Zero dependencies. Runs in any browser or Node.js environment. Works with any model that has an HTTP API.
 
-The retrieval pipeline runs in sub-millisecond time on tens of thousands of nodes. The only model inference is the one you're already paying for.
+## How It Works
 
-## Installation
+The core idea is simple: instead of letting the model accumulate context until it overflows, Luminal clears the slate every turn and reconstructs the prompt intelligently.
+
+**The chain** — every message (user and AI) becomes a node in a linear chain stored in memory. Nothing is ever deleted from the chain unless you explicitly tell it to archive.
+
+**The sliding window** — each turn, the last N messages get sent to the model as its "working memory." This is what the AI actually sees.
+
+**Retrieval** — when you reference something outside the window ("what was that code we wrote earlier?"), the system finds it using keyword search algorithms (BM25, Bloom filters, TF-IDF) and injects it back into the prompt. No neural network needed — just math. Sub-millisecond.
+
+**Tools** — capabilities like web search are registered with descriptions. When your query matches a tool's description, it gets activated for that turn. The AI decides whether to use it, calls it, and the results feed into its response.
+
+**Compaction** — when you're ready, you can archive old sections of the conversation to cold storage. They get compressed, summarized, and indexed so retrieval can still find them later.
+
+```javascript
+const memory = new LuminalMemory({ endpoint: "http://127.0.0.1:8081" });
+await memory.init();
+
+const { response } = await memory.chat("How do bloom filters work?");
+// Later...
+const { response } = await memory.chat("What did we discuss 200 messages ago?");
+// It finds it. Sub-millisecond.
+```
+
+## Why Use Luminal Memory?
+
+**No extra models.** Most "memory" solutions require embedding models, vector databases, or secondary neural networks. Luminal uses pure algorithmic search. Your primary LLM is the only model running.
+
+**No extra hardware.** It runs on whatever is already running your model. Consumer laptop, gaming PC, server — doesn't matter. The retrieval pipeline adds microseconds, not seconds.
+
+**Works with any model.** llama.cpp, Ollama, LM Studio, vLLM, OpenAI — anything with an HTTP API. Swap models without changing your memory layer.
+
+**Actually infinite.** Not "large context" — infinite. Conversations can run for months. Old messages get compressed and archived, but they're always retrievable.
+
+**Extensible tools.** Web search, date/time, or anything you build. Tools are discovered automatically — no prompt bloat from capabilities the model doesn't need right now.
+
+**Zero dependencies.** Ships as a single JavaScript file. No Python, no Docker, no infrastructure. Import it and go.
+
+## Use Cases
+
+- **Local AI assistants** that remember everything across sessions
+- **Research tools** that accumulate knowledge over long conversations
+- **Customer support bots** with persistent context per user
+- **Coding assistants** that recall earlier design decisions and code snippets
+- **Personal AI** that knows your preferences, history, and ongoing projects
+- **Any application** where an LLM needs to reference information beyond its context window
+
+## Get Started
 
 ```bash
 npm install @automacene/luminal-memory
 ```
 
-Or load directly in the browser via CDN:
+**Requirements:** Node.js 18+ (for native `fetch`) or any modern browser. If using CompressionStream for archive gzip, Chrome 80+, Firefox 113+, Safari 16.4+.
+
+**CORS:** If your model server runs locally (llama.cpp, Ollama, etc.), make sure CORS is enabled. For llama-server: `llama-server --cors`. For Ollama: it's enabled by default. Without this, browser requests to your model will be blocked.
+
+```javascript
+import { LuminalMemory, createWebSearchTool } from '@automacene/luminal-memory';
+
+const memory = new LuminalMemory({
+  endpoint: "http://127.0.0.1:8081",  // your model server
+  windowSize: 20                       // messages the AI sees per turn
+});
+
+await memory.init();
+
+// Give it tools (optional — discovered automatically when relevant)
+memory.registerTool(createWebSearchTool());
+
+// Chat — everything is handled automatically
+const { response, toolsUsed } = await memory.chat("What's new in Rust this week?");
+```
+
+Or load directly in the browser:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/@automacene/luminal-memory@latest/dist/luminal-memory.min.js"></script>
 ```
 
-## Quick Start
+## Tools
+
+Tools are never pre-loaded into the prompt. They're discovered via keyword matching against their descriptions and only surface when relevant.
 
 ```javascript
-import { LuminalMemory } from '@automacene/luminal-memory';
+import { createWebSearchTool, createDateTimeTool, Tool } from '@automacene/luminal-memory';
 
-const memory = new LuminalMemory({
-  endpoint: "http://127.0.0.1:8081",
-  windowSize: 20
-});
+// Built-in extensions
+memory.registerTool(createWebSearchTool());  // Web search via Firecrawl (free, no key)
+memory.registerTool(createDateTimeTool());   // Current date/time/timezone
 
-await memory.init();
-
-// Chat handles the full cycle:
-// append → retrieve → build prompt → call LLM → store response
-const response = await memory.chat("How do bloom filters work?");
-console.log(response);
-
-// Context is managed automatically across unlimited turns
-const response2 = await memory.chat("Can you explain the math behind that?");
+// Build your own
+memory.registerTool(new Tool({
+  name: "calculator",
+  description: "Do math when the user asks to calculate or compute something.",
+  parameters: { type: "object", properties: { expression: { type: "string" } }, required: ["expression"] },
+  execute: async (params) => ({ result: eval(params.expression), formatted: `= ${eval(params.expression)}` })
+}));
 ```
 
-## Configuration
+## Memory Management
+
+Luminal calls this **Trim & Branch** — not compaction in the traditional database sense.
+
+**What it is:** You select a section of conversation to keep as your active session. Everything outside that selection gets archived to cold storage (IndexedDB in browser, compressed on disk in Node). The archived blocks are compressed, indexed (Bloom filter + TF-IDF vector), and a summary marker is left in the chain so the AI has macro-awareness of what was archived.
+
+**Why you'd do it:** Not for performance — for focus. Even with 32GB of RAM, you could store millions of messages without slowdown (4GB ≈ 8 million messages ≈ 300 million tokens). BM25 stays sub-millisecond on inverted indexes of that size. You trim because your retrieval results get noisy when the chain has 10,000 messages spanning 50 different topics. Trimming says "I'm done with this section, archive it, but keep it searchable."
+
+**How it works:**
+
+- **Trim** — you pick two points in the conversation. Everything between them stays active. Everything before and after gets archived. You're saying "this is the relevant section right now."
+- **Branch** — you pick one point. Everything before it archives. You're saying "start fresh from here."
+- **Archives are searchable** — the Bloom filter knows which terms exist in which archive block. TF-IDF vectors rank which block is most relevant to a query. When retrieval needs old context, it decompresses only the matching block, runs BM25 inside it, and injects the exact nodes.
+- **Archives are restorable** — `memory.restore(key)` brings a block back into active memory. Nothing is ever permanently lost.
+
+**When to trim:**
+- You finished a project and want to start a new topic without old results polluting retrieval
+- You want cleaner search results — fewer irrelevant matches
+- You're about to switch contexts entirely (new day, new task, new subject)
+- You don't want 6 months of conversation all competing for the 3 recall slots per turn
+
+**When NOT to trim:**
+- You're worried about RAM — you're not going to run out
+- Performance feels slow — the slowness is your LLM inference, not Luminal's retrieval
+- You might reference that section again soon — just leave it, retrieval handles it
 
 ```javascript
-const memory = new LuminalMemory({
-  // LLM Connection
-  endpoint: "http://127.0.0.1:8081",     // your local model server
-  apiFormat: "openai",                     // "openai" | "ollama" | "custom"
-  completionPath: "/v1/chat/completions",  // API path on your server
-  model: "local",                          // model name sent in requests
+// Trim: select what to KEEP, everything else archives
+await memory.trimKeepRange({ keepStart: 10, keepEnd: 30 });
 
-  // System Prompt
-  systemPrompt: "You are a helpful assistant.",
+// Branch: archive everything before a point
+await memory.branchFrom(15);
 
-  // Sliding Window
-  windowSize: 20,            // recent nodes included per prompt
-  maxTokenBudget: 32768,     // max tokens to send to the model
-  reservedTokens: 2048,      // headroom for the model's reply
+// Restore an archive back into active memory
+await memory.restore("archive_1_14");
 
-  // Memory Limits
-  memoryLimitMB: 2048,       // RAM ceiling (plain text is tiny — 2GB holds millions of messages)
-  warnThreshold: 0.8,        // emit warning at 80% utilization
-
-  // Compaction
-  archiveBlockSize: 1000,    // nodes per archive block
-  summaryFormat: "json",     // "json" | "text"
-
-  // Search Tuning
-  bm25: { k1: 1.2, b: 0.4 },
-  bloom: { expectedItems: 100000, falsePositiveRate: 0.01 },
-
-  // Retrieval
-  retrievalThreshold: 0.3,   // BM25 confidence below this triggers archive search
-  maxRetrievedNodes: 3,      // max historical nodes injected per turn
-
-  // Deep Retrieval (hierarchical branching for complex multi-hop questions)
-  deepRetrievalEnabled: true,
-  deepRetrievalThreshold: 2, // number of relevant blocks that triggers branching
-  maxBranches: 7,            // max parallel branch calls
-  branchSummaryMaxTokens: 150,
-
-  // Buffer Budgeting
-  recallBufferRatio: 0.3     // recall gets up to 30% of available tokens; rest goes to sliding window
-});
-```
-
-## API Reference
-
-### Core
-
-```javascript
-// Full chat cycle — append, retrieve, prompt, call LLM, store
-const response = await memory.chat("your message");
-
-// Manual node management (for importing existing conversations)
-memory.append("user", "message");
-memory.append("assistant", "response");
-
-// Search all in-memory history
-const results = memory.search("bloom filters", 10);
-// [{ nodeId, score, node }]
-
-// Get the current sliding window
-const window = memory.getWindow();
-
-// Attach additional context (PDFs, code, etc.) to every prompt
-memory.attachContext("pdf", pdfText);
-memory.clearContext();
-
-// System status
-const status = memory.status();
-// { totalNodes, memoryUsageMB, utilizationPercent, limitMB, archiveBlocks, warning }
-```
-
-### Memory Management
-
-```javascript
-// Trim a specific range to cold storage (IndexedDB / in-memory fallback)
-await memory.trim({ from: 100, to: 500 });
-
-// Trim everything before the current sliding window
-await memory.trimFromHere();
-
-// Branch to a new session — archives everything, starts fresh
-const archiveKey = await memory.branch();
-
-// Restore an archived block back into active memory
-await memory.restore("archive_100_500");
-```
-
-### Events
-
-```javascript
-memory.on("memory-warning", ({ usageMB, utilization, limitMB, blocked }) => {
-  console.log(`Memory at ${Math.round(utilization * 100)}% — consider trimming`);
-});
-```
-
-### Export / Import
-
-```javascript
-// Save full state (chain, indexes, archives)
-const snapshot = await memory.export();
-localStorage.setItem("luminal-state", JSON.stringify(snapshot));
-
-// Restore from snapshot
-const saved = JSON.parse(localStorage.getItem("luminal-state"));
-await memory.import(saved);
-```
-
-### Custom LLM Format
-
-```javascript
-const memory = new LuminalMemory({
-  apiFormat: "custom",
-  formatRequest: (messages, config) => ({
-    url: "http://localhost:5000/generate",
-    headers: { "X-Api-Key": "..." },
-    body: { prompt: messages.map(m => m.content).join("\n") }
-  }),
-  parseResponse: (json) => json.text
-});
+// Search all history (including active chain)
+const results = memory.search("that thing we discussed about authentication");
 ```
 
 ## Model Compatibility
 
-Works with any LLM that exposes an HTTP API:
+| Server | Config |
+|--------|--------|
+| llama.cpp | `apiFormat: "openai"` |
+| Ollama | `apiFormat: "ollama"` |
+| LM Studio | `apiFormat: "openai"` |
+| vLLM | `apiFormat: "openai"` |
+| OpenAI | `apiFormat: "openai"` |
+| Custom | `apiFormat: "custom"` + formatter functions |
 
-| Server | `apiFormat` |
-|--------|------------|
-| llama.cpp (llama-server) | `"openai"` |
-| Ollama | `"ollama"` |
-| LM Studio | `"openai"` |
-| vLLM | `"openai"` |
-| OpenAI API | `"openai"` |
-| Custom | `"custom"` + `formatRequest` / `parseResponse` |
+## Demo
 
-## How It Works
+A full interactive demo is included with the project. It loads a prebuilt conversation, connects to your local model, and lets you test memory retrieval, tool use, trim/branch, and search — all in the browser.
 
-### Every Turn
-
-1. User message is appended to the chain as a new node
-2. LLM context is cleared (fresh slate — the model is stateless)
-3. Sliding window selects the last N nodes that fit the token budget
-4. Retrieval checks if the user is referencing something outside the window
-5. Prompt is assembled: system prompt → attached context → recalled history → sliding window
-6. HTTP POST to the model → response appended as a new node
-
-### Retrieval Pipeline (Pure Math, Sub-Millisecond)
-
-```
-User Query
-    │
-    ▼
-BM25 on active window → high confidence? → skip archive search
-    │
-    (low confidence)
-    ▼
-Bloom filter gate → definitely not in any archive? → skip
-    │
-    (maybe-hit)
-    ▼
-TF-IDF cosine similarity → rank candidate archive blocks
-    │
-    ▼
-Decompress top 1–2 blocks from cold storage
-    │
-    ▼
-BM25 within decompressed block → exact node retrieval
-    │
-    ▼
-Inject into prompt alongside sliding window
+```bash
+git clone https://github.com/automacene/luminal-memory.git
+cd luminal-memory
+npm install
+npm run build:umd
+node serve.js
 ```
 
-### Deep Retrieval (Complex Questions)
+Then open `http://localhost:3000/demo/` in your browser.
 
-When a question needs information from multiple distant archive blocks:
-
-1. Each relevant block gets its own focused LLM call to extract pertinent info
-2. All branch summaries are consolidated with the sliding window into a final synthesis call
-3. Branches are ephemeral — they don't persist in the chain
-4. Cost: N+1 LLM calls (only for complex multi-hop questions; simple questions remain 1 call)
-
-### Trim / Compaction
-
-When you trim, old nodes are:
-- Compressed (gzip via CompressionStream where available)
-- Stored in cold storage (IndexedDB in browser, in-memory Map in Node.js)
-- Replaced by a compaction marker containing a structured summary, a TF-IDF vector, and bloom filter entries
-- Fully restorable at any time via `memory.restore(key)`
-
-## Architecture
-
-```
-src/
-├── core/
-│   ├── node.js               # Single conversation unit with cached metrics
-│   ├── chain.js              # Linear node chain (append, slice, remove)
-│   ├── window.js             # Sliding window selection + message building
-│   ├── buffer.js             # Token-budgeted containers (Sliding, Recall)
-│   ├── conversation-manager.js  # Budget allocation across prompt sections
-│   ├── compaction.js         # Trim, branch, restore operations
-│   ├── retrieval.js          # Search pipeline orchestration
-│   └── deep-retrieval.js     # Hierarchical branching for multi-hop questions
-├── search/
-│   ├── bm25.js              # BM25 scoring engine (inverted index)
-│   ├── bloom.js             # d-Left Counting Bloom Filter (FNV-1a)
-│   └── tfidf.js             # TF-IDF vectors + cosine similarity
-├── storage/
-│   ├── memory.js            # RAM usage tracking + warning events
-│   └── archive.js           # IndexedDB cold storage (gzip compressed)
-├── transport/
-│   └── llm.js              # Model-agnostic HTTP client
-├── config.js               # Defaults + user config merge
-└── index.js                # Main entrypoint + public API
-```
-
-### Key Design Decisions
-
-- **LLM is stateless** — context is rebuilt from scratch every turn
-- **Linear chain only** — simple, predictable, no branching complexity
-- **Retrieval is pure math** — BM25, Bloom filters, TF-IDF. No neural inference for search.
-- **Deep retrieval uses the LLM** — only for complex multi-hop questions spanning multiple archive blocks
-- **Budget-first prompt building** — nothing ever exceeds the model's context limit
-- **Explicit compaction** — you decide when to trim; no automatic data loss
-- **Zero dependencies** — pure ES modules, ships as a single bundled file
-
-### Known Tradeoffs
-
-- **No synonym matching.** Without embeddings, "automobile" won't find "car." Acceptable because users tend to reuse their own vocabulary in persistent conversations.
-- **Multi-hop reasoning.** Small models can still struggle to synthesize across injected nodes. This is a model-weight limitation, not an architecture limitation.
-
-## Browser Compatibility
-
-| Feature | Support |
-|---------|---------|
-| Core (Maps, Arrays, fetch) | All modern browsers |
-| IndexedDB (cold storage) | All modern browsers |
-| CompressionStream (gzip) | Chrome 80+, Firefox 113+, Safari 16.4+ |
-
-Browsers without CompressionStream fall back to storing uncompressed data in IndexedDB.
+Make sure your LLM server is running with CORS enabled (e.g., `llama-server --port 8081 --cors`). The demo defaults to `http://127.0.0.1:8081` — edit the config at the top of `demo/ui/js/app.js` if your setup is different.
 
 ## Development
 
 ```bash
 npm install
-npm run build        # Bundle to dist/ (ESM)
-npm run build:umd    # Bundle to dist/ (UMD, for <script> tags)
-npm test             # Run test suite
-npm run dev          # Watch mode (rebuilds on change)
+npm run build        # ESM bundle
+npm run build:umd    # UMD bundle (browser)
+npm test             # 47 tests
+node serve.js        # Demo at http://localhost:3000/demo/
 ```
-
-### Running the Demo
-
-```bash
-node serve.js
-# → http://localhost:3000/demo/
-```
-
-Make sure your LLM server is running with CORS enabled (e.g., `llama-server --cors`).
 
 ## License
 
 Apache 2.0 © Automacene
+
+---
+
+<details>
+<summary>Full Configuration</summary>
+
+```javascript
+const memory = new LuminalMemory({
+  endpoint: "http://127.0.0.1:8081",
+  apiFormat: "openai",
+  completionPath: "/v1/chat/completions",
+  model: "local",
+  systemPrompt: "You are a helpful assistant.",
+  windowSize: 20,
+  maxTokenBudget: 32768,
+  reservedTokens: 2048,
+  memoryLimitMB: 2048,
+  warnThreshold: 0.8,
+  archiveBlockSize: 1000,
+  summaryFormat: "json",
+  bm25: { k1: 1.2, b: 0.4 },
+  bloom: { expectedItems: 100000, falsePositiveRate: 0.01 },
+  retrievalThreshold: 0.3,
+  maxRetrievedNodes: 3,
+  deepRetrievalEnabled: true,
+  deepRetrievalThreshold: 2,
+  maxBranches: 7,
+  branchSummaryMaxTokens: 150,
+  recallBufferRatio: 0.3,
+  toolMatchThreshold: 0.1
+});
+```
+
+</details>
+
+<details>
+<summary>Full API Reference</summary>
+
+```javascript
+// Chat (full cycle: tools + retrieval + LLM)
+const { response, toolsUsed } = await memory.chat(message);
+
+// Manual nodes
+memory.append(role, content);
+
+// Search
+memory.search(query, topK);
+
+// Window
+memory.getWindow();
+
+// Context attachments
+memory.attachContext(type, content);
+memory.clearContext();
+
+// Tools
+memory.registerTool(tool);
+
+// Memory operations
+await memory.trim({ from, to });
+await memory.trimKeepRange({ keepStart, keepEnd });
+await memory.branchFrom(nodeId);
+await memory.trimFromHere();
+await memory.branch();
+await memory.restore(archiveKey);
+
+// Status & events
+memory.status();
+memory.on("memory-warning", callback);
+
+// Persistence
+await memory.export();
+await memory.import(data);
+```
+
+</details>
+
+<details>
+<summary>Architecture</summary>
+
+```
+src/
+├── core/              # Chain, window, buffers, compaction, retrieval
+├── search/            # BM25, Bloom filter, TF-IDF
+├── storage/           # RAM tracking, IndexedDB archive
+├── transport/         # Model-agnostic HTTP client
+├── tools/             # Tool base class + registry
+├── extensions/        # Web search, datetime (tool implementations)
+├── config.js
+└── index.js
+```
+
+</details>
