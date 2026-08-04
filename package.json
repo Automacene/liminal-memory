@@ -1,0 +1,33 @@
+{
+  "name": "@automacene/luminal-memory",
+  "version": "1.0.0",
+  "description": "Zero-dependency infinite context memory for any LLM. Runs in browser and Node.js.",
+  "main": "dist/luminal-memory.min.js",
+  "module": "src/index.js",
+  "type": "module",
+  "files": [
+    "dist/",
+    "src/"
+  ],
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.min.js --format=esm",
+    "build:umd": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.umd.js --format=iife --global-name=LuminalMemory",
+    "test": "node --test tests/*.test.js",
+    "dev": "esbuild src/index.js --bundle --outfile=dist/luminal-memory.js --format=esm --watch"
+  },
+  "keywords": [
+    "llm",
+    "memory",
+    "context",
+    "bm25",
+    "bloom-filter",
+    "infinite-context",
+    "local-ai",
+    "sliding-window"
+  ],
+  "author": "Automacene",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "esbuild": "^0.21.0"
+  }
+}
