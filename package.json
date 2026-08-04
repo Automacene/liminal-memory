@@ -2,9 +2,18 @@
   "name": "@automacene/luminal-memory",
   "version": "1.0.0",
   "description": "Zero-dependency infinite context memory for any LLM. Runs in browser and Node.js.",
-  "main": "dist/luminal-memory.min.js",
+  "main": "dist/luminal-memory.umd.js",
   "module": "src/index.js",
+  "browser": "dist/luminal-memory.umd.js",
   "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./dist/luminal-memory.umd.js",
+      "browser": "./dist/luminal-memory.umd.js"
+    }
+  },
+  "sideEffects": false,
   "files": [
     "dist/",
     "src/"

@@ -183,14 +183,23 @@ export class LuminalMemory {
       const decision = await this.transport.complete(messages);
       console.log(`[Chat] Tool decision raw: ${decision.slice(0, 300)}`);
 
+      // Clean up common model formatting issues before parsing
+      let cleaned = decision
+        .replace(/```json\s*/gi, '')   // strip markdown json fences
+        .replace(/```\s*/g, '')        // strip closing fences
+        .replace(/^\s*`+|`+\s*$/g, '') // strip stray backticks
+        .trim();
+
       // Try parsing as JSON first
-      const jsonMatch = decision.match(/\{[\s\S]*\}/);
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
           if (!parsed.use) return null;
           return { name: parsed.tool, params: parsed.params || {} };
-        } catch (e) { /* fall through to other formats */ }
+        } catch (e) {
+          console.log(`[Chat] JSON parse failed, trying alternate formats: ${e.message}`);
+        }
       }
 
       // Parse Gemma-style tool calls: <|tool_call>call:name{...}<tool_call|>
@@ -248,6 +257,19 @@ export class LuminalMemory {
     if (role !== "compaction") {
       this.bm25.add(node);
     }
+    return node;
+  }
+
+  /**
+   * Append a complete turn (user + assistant paired) as a single node.
+   * Useful for importing existing conversations or bulk-loading history.
+   * @param {string} userMessage - the user's message
+   * @param {string} assistantMessage - the assistant's response
+   * @returns {object} the created turn node
+   */
+  appendTurn(userMessage, assistantMessage) {
+    const node = this.chain.appendTurn(userMessage, assistantMessage);
+    this.bm25.add(node);
     return node;
   }
 
@@ -451,3 +473,4 @@ export { Tool } from "./tools/base.js";
 export { ToolRegistry } from "./tools/registry.js";
 export { createWebSearchTool } from "./extensions/web-search.js";
 export { createDateTimeTool } from "./extensions/datetime.js";
+export { createProjectGrepTool as createExplorerTool } from "./extensions/explorer.js";

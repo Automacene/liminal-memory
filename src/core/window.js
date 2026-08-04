@@ -51,11 +51,11 @@ export class Window {
     // Inject retrieved historical context before the window
     if (retrievedNodes.length > 0) {
       const contextBlock = retrievedNodes
-        .map(n => `[Historical context - Node ${n.id}] ${n.content}`)
+        .map(n => `[Recalled — Node ${n.id}] ${n.content}`)
         .join("\n\n");
       messages.push({
         role: "system",
-        content: `Relevant context from earlier in this conversation:\n\n${contextBlock}`
+        content: `The following was retrieved from earlier in this conversation because it is relevant to the current question. Use this information directly in your response:\n\n${contextBlock}`
       });
     }
 

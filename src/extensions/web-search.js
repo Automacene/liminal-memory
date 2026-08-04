@@ -22,7 +22,7 @@ export function createWebSearchTool(config = {}) {
 
   return new Tool({
     name: "web_search",
-    description: "Search the web for current information, news, documentation, tutorials, or answers to questions that require up-to-date knowledge. Use when the user asks about something that might not be in the conversation history or needs fresh data from the internet.",
+    description: "Search the web for current information, news, documentation, tutorials, or answers to questions that require up-to-date knowledge. Use when the user asks about something that might not be in the conversation history or needs fresh data from the internet. [Synonyms: google, lookup, look up, check online, find on web, latest, current, search for, what is, who is, news about, price of, weather, release date, version]",
     parameters: {
       type: "object",
       properties: {

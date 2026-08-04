@@ -88,6 +88,97 @@ const Chat = (function () {
     streamEl.scrollTop = streamEl.scrollHeight;
   }
 
+  /**
+   * Create a streaming message that updates live as tokens arrive.
+   * Returns { thinkEl, contentEl, finalize(fullText) }
+   */
+  function createStreamingMessage(nodeId) {
+    if (!streamEl) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message message--assistant';
+    if (nodeId) wrapper.dataset.nodeId = nodeId;
+
+    const sender = document.createElement('div');
+    sender.className = 'message__sender';
+    sender.textContent = '\u25C8 LUMINAL';
+
+    const body = document.createElement('div');
+    body.className = 'message__body';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'message__header';
+    const pill1 = document.createElement('span');
+    pill1.className = 'wire-pill wire-pill--accent';
+    pill1.textContent = '[ RESPONSE ]';
+    const pill2 = document.createElement('span');
+    pill2.className = 'wire-pill';
+    pill2.textContent = 'NODE ' + (nodeId || '?');
+    header.appendChild(pill1);
+    header.appendChild(pill2);
+    body.appendChild(header);
+
+    // Think block (dimmed, shows when tokens arrive)
+    const thinkWrapper = document.createElement('div');
+    thinkWrapper.className = 'tool-block';
+    thinkWrapper.style.marginBottom = '10px';
+    thinkWrapper.style.opacity = '0.5';
+    const thinkHeader = document.createElement('div');
+    thinkHeader.className = 'tool-block__header';
+    thinkHeader.innerHTML = '<span>[ THINKING ]</span><span class="tool-block__reward">reasoning</span>';
+    const thinkContent = document.createElement('div');
+    thinkContent.style.whiteSpace = 'pre-wrap';
+    thinkContent.style.maxHeight = '150px';
+    thinkContent.style.overflowY = 'auto';
+    thinkContent.style.fontSize = '11px';
+    thinkContent.textContent = 'waiting for reasoning...';
+    thinkWrapper.appendChild(thinkHeader);
+    thinkWrapper.appendChild(thinkContent);
+    body.appendChild(thinkWrapper);
+
+    // Content area
+    const contentEl = document.createElement('div');
+    contentEl.className = 'message__content markdown';
+    body.appendChild(contentEl);
+
+    wrapper.appendChild(sender);
+    wrapper.appendChild(body);
+    streamEl.appendChild(wrapper);
+    streamEl.scrollTop = streamEl.scrollHeight;
+
+    return {
+      thinkEl: thinkContent,
+      thinkWrapper: thinkWrapper,
+      contentEl: contentEl,
+      body: body,
+      appendThink: function (token) {
+        if (thinkContent.textContent === 'waiting for reasoning...') thinkContent.textContent = '';
+        thinkWrapper.style.opacity = '0.7';
+        thinkContent.textContent += token;
+        streamEl.scrollTop = streamEl.scrollHeight;
+        console.log('[Stream:think]', token.slice(0, 50));
+      },
+      appendContent: function (token) {
+        // Accumulate raw text, re-render as markdown periodically
+        contentEl._raw = (contentEl._raw || '') + token;
+        if (typeof marked !== 'undefined') {
+          contentEl.innerHTML = marked.marked(contentEl._raw);
+        } else {
+          contentEl.textContent = contentEl._raw;
+        }
+        streamEl.scrollTop = streamEl.scrollHeight;
+      },
+      finalize: function (fullText) {
+        if (typeof marked !== 'undefined') {
+          contentEl.innerHTML = marked.marked(fullText);
+        } else {
+          contentEl.textContent = fullText;
+        }
+      }
+    };
+  }
+
   function renderWindowBoundary() {
     if (!streamEl) return;
     const el = document.createElement('div');
@@ -202,5 +293,5 @@ const Chat = (function () {
     streamEl.scrollTop = streamEl.scrollHeight;
   }
 
-  return { init, renderMessage, renderSystem, renderRecall, renderSources, renderWindowBoundary, removeArchived, clear };
+  return { init, renderMessage, renderSystem, renderRecall, createStreamingMessage, renderSources, renderWindowBoundary, removeArchived, clear };
 })();

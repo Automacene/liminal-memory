@@ -39,6 +39,11 @@ export class LLMTransport {
       stream: false
     };
 
+    // Enable thinking/reasoning if configured
+    if (this.config.thinking) {
+      body.thinking = true;
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,7 +55,142 @@ export class LLMTransport {
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || "";
+    let content = data.choices?.[0]?.message?.content || "";
+    let reasoning = data.choices?.[0]?.message?.reasoning_content || "";
+
+    // Log reasoning if present (Gemma 4 format)
+    if (reasoning) {
+      console.log(`[LLM:think] ${reasoning.slice(0, 300)}`);
+    }
+
+    // Strip inline thinking tags if present (other model formats)
+    const thinkMatch = content.match(/<\|?think\|?>([\s\S]*?)<\|?\/?think\|?>/);
+    if (thinkMatch) {
+      console.log(`[LLM:think] ${thinkMatch[1].slice(0, 300)}`);
+      content = content.replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>\s*/g, '').trim();
+    }
+
+    return content;
+  }
+
+  /**
+   * OpenAI-compatible streaming completion.
+   * Calls onThink(token) during <think> blocks, onToken(token) for the response.
+   * Returns the full response text when done.
+   * @param {object[]} messages
+   * @param {object} callbacks - { onToken, onThink, onDone }
+   * @returns {string} full response
+   */
+  async _openaiStream(messages, callbacks = {}) {
+    const url = `${this.config.endpoint}${this.config.completionPath}`;
+    const body = {
+      model: this.config.model,
+      messages,
+      stream: true
+    };
+
+    if (this.config.thinking) {
+      body.thinking = true;
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM stream failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let inThink = false;
+    let thinkText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta || {};
+          const token = delta.content || '';
+          const reasoningToken = delta.reasoning_content || '';
+
+          // Handle reasoning_content field (Gemma 4 style)
+          if (reasoningToken) {
+            fullText += reasoningToken;
+            inThink = true;
+            thinkText += reasoningToken;
+            if (callbacks.onThink) callbacks.onThink(reasoningToken);
+            continue;
+          }
+
+          // If we were in reasoning and now get content, we've switched
+          if (inThink && token) {
+            inThink = false;
+          }
+
+          if (!token) continue;
+          fullText += token;
+
+          // Handle inline <think> / </think> tags (other models)
+          if (token.includes('<think>') || token.includes('<|think|>')) {
+            inThink = true;
+            const afterTag = token.replace(/<\|?think\|?>/g, '');
+            if (afterTag && callbacks.onThink) callbacks.onThink(afterTag);
+            thinkText += afterTag;
+            continue;
+          }
+          if (inThink && (token.includes('</think>') || token.includes('<|/think|>'))) {
+            inThink = false;
+            const beforeTag = token.replace(/<\|?\/think\|?>/g, '');
+            if (beforeTag && callbacks.onThink) callbacks.onThink(beforeTag);
+            thinkText += beforeTag;
+            continue;
+          }
+
+          if (inThink) {
+            thinkText += token;
+            if (callbacks.onThink) callbacks.onThink(token);
+          } else {
+            if (callbacks.onToken) callbacks.onToken(token);
+          }
+        } catch { /* skip malformed chunks */ }
+      }
+    }
+
+    if (callbacks.onDone) callbacks.onDone(fullText, thinkText);
+
+    // Return cleaned content (without think tags)
+    return fullText.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim();
+  }
+
+  /**
+   * Stream a completion with callbacks. Falls back to non-streaming if callbacks not provided.
+   * @param {object[]} messages
+   * @param {object} [callbacks] - { onToken, onThink, onDone }
+   * @returns {string}
+   */
+  async stream(messages, callbacks) {
+    const { apiFormat } = this.config;
+    if (apiFormat === "openai" || !apiFormat) {
+      return this._openaiStream(messages, callbacks);
+    }
+    // Fallback: non-streaming
+    return this.complete(messages);
   }
 
   /**

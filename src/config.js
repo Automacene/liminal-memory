@@ -111,7 +111,7 @@ export const defaultConfig = {
 
   // Master switch to enable/disable deep retrieval entirely.
   // When off, the system uses simple single-pass injection even for complex questions.
-  deepRetrievalEnabled: true,
+  deepRetrievalEnabled: false,
 
   // ===== BUFFER BUDGETING =====
 

@@ -14,10 +14,14 @@
     apiFormat: 'openai',
     completionPath: '/v1/chat/completions',
     model: 'gemma-4-26B-A4B-it',
-    systemPrompt: 'You are a helpful assistant.',
-    windowSize: 20,
+    thinking: true,
+    systemPrompt: 'You are Luminal — an AI assistant powered by the Luminal Memory engine. Your memory is managed by a sliding window of recent messages plus a recall system that retrieves relevant history from earlier in the conversation. When you see recalled context injected into the prompt, use it directly in your answer. If the information to answer a question is present in the conversation history or recalled nodes, reference it specifically. If something is not in the provided context, say so rather than guessing. Be concise, accurate, and cite which part of the conversation informed your answer when relevant.',
+    windowSize: 40,
     maxTokenBudget: 32768,
-    reservedTokens: 2048,
+    reservedTokens: 4096,
+    maxRetrievedNodes: 6,
+    recallBufferRatio: 0.2,
+    retrievalThreshold: 0.2,
     memoryLimitMB: 2048
   };
 
@@ -129,7 +133,9 @@
     memory.registerTool(webSearch);
     var dateTime = LuminalMemory.createDateTimeTool();
     memory.registerTool(dateTime);
-    console.log('[Init] Tools registered: web_search, datetime');
+    var grep = LuminalMemory.createExplorerTool({ serverUrl: '' });
+    memory.registerTool(grep);
+    console.log('[Init] Tools registered: web_search, datetime, project_explorer');
 
     // Memory warning listener
     memory.on('memory-warning', function (data) {
@@ -219,20 +225,44 @@
           return typeof t.result === 'string' ? t.result : JSON.stringify(t.result, null, 2);
         }).join('\n\n');
 
-        // Insert as last system message right before user's question
+        // Build recalled context summary
+        var recallContext = '';
+        if (recallNodes.length > 0) {
+          recallContext = recallNodes.map(function (n) {
+            return '[Node ' + n.id + '] ' + (n.content || '').slice(0, 300);
+          }).join('\n');
+        }
+
+        // Build a structured synthesis template
         var lastIdx = messages.length - 1;
         messages.splice(lastIdx, 0, {
           role: 'system',
-          content: 'Answer using ONLY the search results below. Synthesize the best answer from all sources. Use numbered references like [1], [2] to cite sources. If sources disagree, mention both perspectives.\n\n' + toolContext
+          content: 'Answer the user\'s question by filling in ALL applicable sections below. Use specifics from each source — do not give generic answers.\n\n'
+            + '─── FROM CONVERSATION HISTORY (what was discussed previously) ───\n'
+            + (recallContext || '(no recalled history for this query)')
+            + '\n\n─── FROM TOOL OUTPUT (data just retrieved) ───\n'
+            + toolContext
+            + '\n\n─── INSTRUCTIONS ───\n'
+            + 'Synthesize a complete answer using BOTH the conversation history above AND the tool output. Reference specific details from each. If conversation history explains what this project is, use that. If the tool shows file structure, connect the two.'
         });
       }
 
       var response;
       if (llmAvailable) {
-        response = await memory.transport.complete(messages);
+        // Stream response with live thinking + token display
+        var streamMsg = Chat.createStreamingMessage(memory.chain.length + 1);
+        response = await memory.transport.stream(messages, {
+          onThink: function (token) { if (streamMsg) streamMsg.appendThink(token); },
+          onToken: function (token) { if (streamMsg) streamMsg.appendContent(token); },
+          onDone: function (full, think) {
+            if (think) console.log('[LLM:think] ' + think.slice(0, 200));
+            if (streamMsg) streamMsg.finalize(full.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim());
+          }
+        });
       } else {
         await new Promise(function (r) { setTimeout(r, 400 + Math.random() * 600); });
         response = getMockResponse(msg);
+        Chat.renderMessage('assistant', response, memory.chain.length + 1, true);
       }
 
       // Replace pending with turn node
@@ -241,10 +271,8 @@
       var turnNode = memory.chain.appendTurn(msg, response);
       memory.bm25.add(turnNode);
 
-      Chat.renderMessage('assistant', response, turnNode.id, true);
-
-      // Append clickable source references if tools were used
-      if (toolResults.length > 0 && toolResults[0].result && toolResults[0].result.results) {
+      // Source links for web search      // Append clickable source references only for web search results
+      if (toolResults.length > 0 && toolResults[0].name === 'web_search' && toolResults[0].result && toolResults[0].result.results && toolResults[0].result.results.length > 0) {
         Chat.renderSources(toolResults[0].result.results);
       }
 
