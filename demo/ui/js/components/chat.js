@@ -179,5 +179,28 @@ const Chat = (function () {
     return el;
   }
 
-  return { init, renderMessage, renderSystem, renderRecall, renderWindowBoundary, removeArchived, clear };
+  function renderSources(results) {
+    if (!streamEl || !results || results.length === 0) return;
+    var el = document.createElement('div');
+    el.className = 'message message--system';
+    el.style.animation = 'fadeSlideIn 0.3s ease both';
+    var body = document.createElement('div');
+    body.className = 'message__body sources-list';
+    body.style.fontFamily = 'var(--font-mono)';
+    body.style.fontSize = '11px';
+    body.style.lineHeight = '1.8';
+
+    var html = '<strong style="color:var(--color-accent);">Sources</strong><br>';
+    results.forEach(function (r, i) {
+      html += '<a href="' + r.url + '" target="_blank" rel="noopener" style="color:var(--color-accent); text-decoration:none; display:block;">';
+      html += '<span style="color:var(--color-accent);">[' + (i + 1) + ']</span> ' + r.title;
+      html += '</a>';
+    });
+    body.innerHTML = html;
+    el.appendChild(body);
+    streamEl.appendChild(el);
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+
+  return { init, renderMessage, renderSystem, renderRecall, renderSources, renderWindowBoundary, removeArchived, clear };
 })();
