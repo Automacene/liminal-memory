@@ -161,6 +161,12 @@
   border: 1px solid #e5e5e5;
 }
 
+.wire-pill--accent {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+}
+
 /* ---- Status Badge ---- */
 .status-badge {
   display: inline-flex;
