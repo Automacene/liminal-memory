@@ -1,0 +1,261 @@
+/**
+ * Luminal Memory — Main App Controller
+ * Initializes the real LuminalMemory engine, loads test data,
+ * and wires all UI components together.
+ * 
+ * No ES modules — loads as a regular script after component scripts.
+ */
+(function () {
+  'use strict';
+
+  // === Config ===
+  var CONFIG = {
+    endpoint: 'http://127.0.0.1:8081',
+    apiFormat: 'openai',
+    completionPath: '/v1/chat/completions',
+    model: 'gemma-4-26B-A4B-it',
+    systemPrompt: 'You are a helpful assistant.',
+    windowSize: 20,
+    maxTokenBudget: 32768,
+    reservedTokens: 2048,
+    memoryLimitMB: 2048
+  };
+
+  // === State ===
+  var memory = new LuminalMemory.LuminalMemory(CONFIG);
+  var ready = false;
+  var llmAvailable = false;
+
+  // === Test conversation fixture — loaded via module script into window.conversation35 ===
+  var conversation = null;
+
+  // === Boot — always wait for fixture-ready event ===
+  window.addEventListener('fixture-ready', function () {
+    conversation = window.conversation35;
+    init();
+  });
+
+  // === Mock LLM responses ===
+  var mockResponses = [
+    'Based on the retrieval pipeline, I found relevant context from earlier in our conversation to answer that.',
+    'The BM25 search identified matching nodes in the chain. Here is what I found from the recalled context.',
+    'Interesting question. Let me pull from the memory graph to give you a useful answer.',
+    'I found relevant nodes outside the current window. The recall buffer has been populated with historical context.',
+    'The bloom filter confirmed potential matches in the active chain. BM25 scored and ranked the results.',
+    'Searching the sliding window and recall buffer for relevant context to synthesize a response.'
+  ];
+  var mockIdx = 0;
+
+  function getMockResponse(query) {
+    var q = query.toLowerCase();
+    if (q.indexOf('pineapple') !== -1 || q.indexOf('code word') !== -1 || q.indexOf('secret') !== -1) {
+      return 'The secret code word is pineapple \u2014 you set it up back in turn 4 during the BM25 Python session. Retrieved from node 4 via BM25 recall.';
+    }
+    if (q.indexOf('dog') !== -1 || q.indexOf('corgi') !== -1 || q.indexOf('biscuit') !== -1 || q.indexOf('mochi') !== -1) {
+      return "From memory chain: your friend has a corgi named Biscuit who herds cats. You're getting your own corgi named Mochi. Vet is Dr. Nakamura, Hillside Animal Clinic, 4th street.";
+    }
+    if (q.indexOf('bm25') !== -1 || q.indexOf('python') !== -1 || q.indexOf('k1') !== -1) {
+      return 'Retrieved from chain: Python 3.11.4, project at C:\\Users\\dev\\projects\\memory-engine. BM25 settings for conversational text: k1=1.2, b=0.4.';
+    }
+    if (q.indexOf('tokyo') !== -1 || q.indexOf('japan') !== -1 || q.indexOf('cherry') !== -1 || q.indexOf('flight') !== -1) {
+      return 'From recalled nodes: Tokyo trip March 28 - April 8, ANA flight NH109. Airalo eSIM, Suica card, budget ~\u00A510,000-15,000/day. Vegetarian: try shojin ryori.';
+    }
+    if (q.indexOf('music') !== -1 || q.indexOf('beat') !== -1 || q.indexOf('fl studio') !== -1) {
+      return "From memory: FL Studio on Windows, lo-fi at 80 BPM, trap at 140 BPM. Splice username: beatmaker_mochi. Focusrite Scarlett 2i2 interface.";
+    }
+    if (q.indexOf('pc') !== -1 || q.indexOf('cpu') !== -1 || q.indexOf('build') !== -1 || q.indexOf('ryzen') !== -1) {
+      return 'From chain: Ryzen 7 7800X3D, MSI MAG B650 TOMAHAWK, 32GB DDR5-6000, RTX 4060 Ti, Fractal Meshify 2, Corsair RM750x. Microcenter Tustin.';
+    }
+    var resp = mockResponses[mockIdx % mockResponses.length];
+    mockIdx++;
+    return resp;
+  }
+
+  // === Initialize ===
+  async function init() {
+    // Init all components
+    Topbar.init();
+    Chat.init();
+    Modal.init();
+
+    // Init memory engine
+    await memory.init();
+
+    // Load test conversation into the real chain
+    for (var i = 0; i < conversation.length - 1; i += 2) {
+      var user = conversation[i];
+      var assistant = conversation[i + 1];
+      if (user && assistant) {
+        memory.chain.appendTurn(user.content, assistant.content);
+        var node = memory.chain.all()[memory.chain.length - 1];
+        memory.bm25.add(node);
+      }
+    }
+
+    // Render preloaded messages
+    for (var j = 0; j < conversation.length; j++) {
+      Chat.renderMessage(conversation[j].role, conversation[j].content, Math.ceil((j + 1) / 2), false);
+    }
+
+    // Check if LLM is reachable
+    try {
+      var res = await fetch(CONFIG.endpoint + '/v1/models', { signal: AbortSignal.timeout(2000) });
+      llmAvailable = res.ok;
+    } catch (e) {
+      llmAvailable = false;
+    }
+
+    // Init components that need memory ref
+    SearchModal.init(memory);
+    InspectModal.init(memory);
+    StatusModal.init(memory);
+    Input.init(handleSend);
+    Toolbar.init({
+      onTrim: handleTrim,
+      onBranch: handleBranch,
+      onSearch: function () { SearchModal.open(); },
+      onInspect: function () { InspectModal.open(); },
+      onStatus: function () { StatusModal.open(); }
+    });
+
+    // Memory warning listener
+    memory.on('memory-warning', function (data) {
+      Chat.renderSystem('\u26A0\uFE0F Memory at ' + Math.round(data.utilization * 100) + '% (' + data.usageMB.toFixed(1) + ' MB). Consider trimming.');
+    });
+
+    ready = true;
+    Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
+    refreshStats();
+
+    if (!llmAvailable) {
+      Chat.renderSystem('\u26A1 No LLM server at ' + CONFIG.endpoint + ' \u2014 using mock responses. Memory/search/retrieval are all real.');
+    }
+
+    console.log('[Init] Chain: ' + memory.chain.length + ' nodes | Window: ' + memory.getWindow().length + '/' + CONFIG.windowSize + ' | LLM: ' + llmAvailable);
+  }
+
+  // === Send handler ===
+  async function handleSend(msg) {
+    if (!ready) return;
+
+    Input.disable();
+    Topbar.setStatus('active', 'THINKING');
+    Chat.renderMessage('user', msg, memory.chain.length + 1, true);
+
+    try {
+      // Real: append to chain + BM25 index
+      var pendingNode = memory.chain.append('user', msg);
+      memory.bm25.add(pendingNode);
+
+      // Real: get window and find recall candidates
+      var windowNodes = memory.getWindow();
+      var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
+
+      var searchResults = memory.bm25.search(msg, 10);
+      var recallNodes = searchResults
+        .filter(function (r) { return !windowIds.has(r.nodeId); })
+        .slice(0, memory.config.maxRetrievedNodes)
+        .map(function (r) { return memory.chain.get(r.nodeId); })
+        .filter(Boolean);
+
+      if (recallNodes.length > 0) {
+        Chat.renderRecall(recallNodes.length);
+        console.log('[Recall] ' + recallNodes.length + ' nodes from outside window');
+      }
+
+      // Build real prompt
+      var messages = memory.window.buildMessages(windowNodes, recallNodes, CONFIG.systemPrompt);
+
+      var response;
+      if (llmAvailable) {
+        response = await memory.transport.complete(messages);
+      } else {
+        await new Promise(function (r) { setTimeout(r, 400 + Math.random() * 600); });
+        response = getMockResponse(msg);
+      }
+
+      // Replace pending with turn node
+      memory.chain.removeById(pendingNode.id);
+      memory.bm25.remove(pendingNode.id);
+      var turnNode = memory.chain.appendTurn(msg, response);
+      memory.bm25.add(turnNode);
+
+      Chat.renderMessage('assistant', response, turnNode.id, true);
+      Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
+
+      console.log('[Node ' + turnNode.id + '] appended | chain: ' + memory.chain.length + ' | window: ' + memory.getWindow().length);
+    } catch (err) {
+      Chat.renderSystem('\u274C Error: ' + err.message);
+      Topbar.setStatus('idle', 'ERROR');
+      console.error(err);
+    }
+
+    Input.enable();
+    refreshStats();
+  }
+
+  // === Trim ===
+  async function handleTrim() {
+    if (!ready) return;
+    try {
+      var windowNodes = memory.getWindow();
+      var allNodes = memory.chain.all();
+      var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
+      var nodesToTrim = allNodes.filter(function (n) { return !windowIds.has(n.id); });
+
+      if (nodesToTrim.length === 0) {
+        Chat.renderSystem('Nothing to trim \u2014 history is smaller than window size.');
+        return;
+      }
+
+      var summary = {
+        startTopic: (nodesToTrim[0].query || nodesToTrim[0].content || '').slice(0, 80),
+        keyDecisions: ['Trimmed via UI'],
+        openThreads: []
+      };
+
+      var result = await memory.trimFromHere(summary);
+      if (result) {
+        Chat.renderSystem('\u2702\uFE0F Trimmed ' + nodesToTrim.length + ' nodes to archive. Compaction marker inserted.');
+      }
+    } catch (err) {
+      Chat.renderSystem('\u274C Trim failed: ' + err.message);
+    }
+    refreshStats();
+  }
+
+  // === Branch ===
+  async function handleBranch() {
+    if (!ready) return;
+    try {
+      var allNodes = memory.chain.all();
+      if (allNodes.length === 0) {
+        Chat.renderSystem('Nothing to branch \u2014 no history.');
+        return;
+      }
+
+      var summary = {
+        startTopic: (allNodes[0].query || allNodes[0].content || '').slice(0, 80),
+        keyDecisions: ['Branched via UI'],
+        openThreads: []
+      };
+
+      var key = await memory.branch(summary);
+      if (key) {
+        Chat.renderSystem('\u2325 Branched. Archived as: ' + key);
+        Chat.clear();
+      }
+    } catch (err) {
+      Chat.renderSystem('\u274C Branch failed: ' + err.message);
+    }
+    refreshStats();
+  }
+
+  // === Refresh stats in topbar ===
+  function refreshStats() {
+    var s = memory.status();
+    Topbar.updateStats(s.totalNodes, memory.getWindow().length, s.memoryUsageMB);
+  }
+
+  // Boot is triggered by fixture-ready event above
+})();

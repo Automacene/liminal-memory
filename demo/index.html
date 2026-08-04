@@ -2,450 +2,229 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Luminal Memory — Demo</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    header {
-      padding: 16px 24px;
-      background: #16213e;
-      border-bottom: 1px solid #333;
-    }
-    header h1 { font-size: 1.4rem; color: #7ec8e3; }
-    header p { font-size: 0.85rem; color: #888; margin-top: 4px; }
-
-    #status-bar {
-      padding: 8px 24px;
-      background: #0f3460;
-      font-size: 0.8rem;
-      color: #aaa;
-      display: flex;
-      gap: 24px;
-    }
-    #status-bar span { color: #7ec8e3; }
-
-    #chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .msg {
-      max-width: 75%;
-      padding: 12px 16px;
-      border-radius: 12px;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .msg.user {
-      align-self: flex-end;
-      background: #1a4a7a;
-      border-bottom-right-radius: 4px;
-    }
-    .msg.assistant {
-      align-self: flex-start;
-      background: #2a2a4a;
-      border-bottom-left-radius: 4px;
-    }
-    .msg.system {
-      align-self: center;
-      background: #333;
-      font-size: 0.8rem;
-      color: #aaa;
-      border-radius: 8px;
-    }
-
-    #input-area {
-      padding: 16px 24px;
-      background: #16213e;
-      border-top: 1px solid #333;
-      display: flex;
-      gap: 12px;
-    }
-    #input-area input {
-      flex: 1;
-      padding: 12px 16px;
-      border-radius: 8px;
-      border: 1px solid #444;
-      background: #1a1a2e;
-      color: #eee;
-      font-size: 1rem;
-      outline: none;
-    }
-    #input-area input:focus { border-color: #7ec8e3; }
-    #input-area button {
-      padding: 12px 24px;
-      border-radius: 8px;
-      border: none;
-      background: #7ec8e3;
-      color: #1a1a2e;
-      font-weight: bold;
-      cursor: pointer;
-      font-size: 1rem;
-    }
-    #input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
-    #input-area button:hover:not(:disabled) { background: #5ab0d0; }
-
-    #controls {
-      padding: 8px 24px;
-      background: #0f3460;
-      display: flex;
-      gap: 12px;
-      font-size: 0.85rem;
-    }
-    #controls button {
-      padding: 6px 12px;
-      border-radius: 6px;
-      border: 1px solid #444;
-      background: transparent;
-      color: #7ec8e3;
-      cursor: pointer;
-      font-size: 0.8rem;
-    }
-    #controls button:hover { background: #1a4a7a; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Luminal Memory</title>
+  <link rel="stylesheet" href="ui/css/main.css">
 </head>
 <body>
-  <header>
-    <h1>Luminal Memory</h1>
-    <p>Infinite context memory for your local LLM — running in your browser right now</p>
-  </header>
 
-  <div id="status-bar">
-    <div>Nodes: <span id="stat-nodes">0</span></div>
-    <div>Memory: <span id="stat-memory">0 MB</span></div>
-    <div>Window: <span id="stat-window">0</span> nodes</div>
-    <div>Archives: <span id="stat-archives">0</span></div>
+  <!-- ============================================================
+       BACKGROUND LAYER 1: Structural Wireframe Grid
+  ============================================================ -->
+  <div class="bg-grid">
+    <!-- Row 1 (top strip) -->
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--bl">[ .NODE ]</span>
+    </div>
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--tl">[ 200 OK ]</span>
+      <!-- Orange accent star -->
+      <span class="grid-star" style="top:14px; right:30%;">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0L14.5 9.5L24 12L14.5 14.5L12 24L9.5 14.5L0 12L9.5 9.5L12 0Z"/></svg>
+      </span>
+    </div>
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--tr">[ RECALL ]</span>
+    </div>
+
+    <!-- Row 2 (main workspace) -->
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--tl">[ BM25 ]</span>
+      <!-- Dot matrix icon -->
+      <div class="dot-matrix" style="bottom:12px; left:12px;">
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+      </div>
+    </div>
+    <div class="bg-grid__cell bg-grid__cell--center">
+      <!-- Dense sub-grid (12x6) -->
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+      <div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div><div class="bg-grid__sub-cell"></div>
+    </div>
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--tr">[ BLOOM ]</span>
+      <!-- Orange accent star -->
+      <span class="grid-star" style="bottom:20px; left:15px;">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0L14.5 9.5L24 12L14.5 14.5L12 24L9.5 14.5L0 12L9.5 9.5L12 0Z"/></svg>
+      </span>
+      <!-- Dot matrix icon -->
+      <div class="dot-matrix" style="top:14px; right:12px;">
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+        <div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div><div class="dot-matrix__dot"></div>
+      </div>
+    </div>
+
+    <!-- Row 3 (bottom strip) -->
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--tl">[ .JSON ]</span>
+    </div>
+    <div class="bg-grid__cell"></div>
+    <div class="bg-grid__cell">
+      <span class="wire-tag wire-tag--br">[ TF-IDF ]</span>
+    </div>
   </div>
 
-  <div id="controls">
-    <button id="btn-trim">Trim History</button>
-    <button id="btn-branch">Branch (New Session)</button>
-    <button id="btn-search">Search History</button>
-    <button id="btn-status">Status</button>
-    <button id="btn-inspect">Inspect State</button>
+  <!-- Footer Wireframe Strip (schematic labels) -->
+  <div class="bg-grid__footer">
+    <div class="bg-grid__footer-cell"></div>
+    <div class="bg-grid__footer-cell"><span class="footer-label">Logo</span></div>
+    <div class="bg-grid__footer-cell"><span class="footer-label">Navigation</span></div>
+    <div class="bg-grid__footer-cell"><div class="footer-block footer-block--accent"></div></div>
+    <div class="bg-grid__footer-cell"><div class="footer-block"></div></div>
+    <div class="bg-grid__footer-cell"><span class="footer-label">.JSON</span></div>
   </div>
 
-  <div id="inspector" style="display:none; padding:16px 24px; background:#111; border-bottom:1px solid #333; font-family:monospace; font-size:0.75rem; color:#aaa; max-height:300px; overflow-y:auto; white-space:pre-wrap;"></div>
+  <!-- ============================================================
+       BACKGROUND LAYER 2: Animated Geometric Canvas
+  ============================================================ -->
+  <canvas class="geo-canvas" id="geo-canvas"></canvas>
 
-  <div id="chat"></div>
+  <!-- ============================================================
+       APPLICATION LAYER
+  ============================================================ -->
+  <div class="app">
 
-  <div id="input-area">
-    <input type="text" id="user-input" placeholder="Type a message..." autofocus />
-    <button id="send-btn">Send</button>
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar__brand">
+        <svg class="topbar__brand-icon" viewBox="0 0 24 24" fill="currentColor">
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M3 3H21V21H3V3ZM12 6L6 18H9.5L10.8 15H13.2L14.5 18H18L12 6ZM12 9.5L13 12.5H11L12 9.5Z"/>
+        </svg>
+        <span>LUMINAL</span>
+        <span class="topbar__version">v1.0</span>
+      </div>
+      <div class="topbar__status">
+        <span><span class="topbar__dot" id="status-dot"></span> <span id="status-label">IDLE</span></span>
+        <span>Nodes: <strong id="stat-nodes">0</strong></span>
+        <span>Window: <strong id="stat-window">0</strong></span>
+        <span>Memory: <strong id="stat-memory">0 MB</strong></span>
+      </div>
+    </header>
+
+    <!-- Main Body -->
+    <div class="app__body">
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <button class="btn-control" id="btn-trim" title="Trim history before current window">✂ Trim</button>
+        <button class="btn-control" id="btn-branch" title="Archive everything, start fresh">⌥ Branch</button>
+        <span class="toolbar__divider"></span>
+        <button class="btn-control" id="btn-search" title="Search conversation history">⌕ Search</button>
+        <button class="btn-control" id="btn-inspect" title="Inspect memory state">◉ Inspect</button>
+        <button class="btn-control" id="btn-status" title="System status">⊡ Status</button>
+      </div>
+
+      <!-- Chat Area -->
+      <div class="app__chat-area">
+        <div class="chat-stream" id="chat-stream">
+          <!-- Messages render here -->
+        </div>
+
+        <!-- Input -->
+        <div class="input-area">
+          <div class="input-box">
+            <textarea class="input-box__textarea" id="user-input" placeholder="Type a message..." rows="1"></textarea>
+            <div class="input-box__actions">
+              <div class="input-box__pills">
+                <button class="pill-btn active" id="pill-auto">░ Auto</button>
+                <button class="pill-btn" id="pill-recall">⠶ Recall</button>
+                <button class="pill-btn" id="pill-deep">⣿ Deep</button>
+              </div>
+              <button class="btn-icon btn-icon--accent" id="send-btn" title="Send">→</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Load Luminal Memory -->
+  <!-- ============================================================
+       MODALS
+  ============================================================ -->
+
+  <!-- Modal: Search -->
+  <div class="modal-backdrop" id="modal-search-backdrop"></div>
+  <div class="modal" id="modal-search">
+    <div class="modal__header">
+      <span class="modal__title">Search History</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-search-close">✕</button>
+    </div>
+    <div class="modal__body">
+      <div style="margin-bottom: var(--space-12);">
+        <input type="text" id="search-input" placeholder="Search your conversation history..."
+          style="width:100%; padding:var(--space-10) var(--space-12); border:1px solid var(--color-border); border-radius:var(--radius-lg); font-size:var(--text-base);">
+      </div>
+      <div id="search-results" class="matrix-box" style="min-height:100px;">No results yet.</div>
+    </div>
+  </div>
+
+  <!-- Modal: Inspect -->
+  <div class="modal-backdrop" id="modal-inspect-backdrop"></div>
+  <div class="modal" id="modal-inspect" style="max-width:720px;">
+    <div class="modal__header">
+      <span class="modal__title">Memory Inspector</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-inspect-close">✕</button>
+    </div>
+    <div class="modal__body">
+      <div id="inspect-output" class="matrix-box" style="min-height:200px; max-height:60vh; overflow-y:auto;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Modal: Status -->
+  <div class="modal-backdrop" id="modal-status-backdrop"></div>
+  <div class="modal" id="modal-status" style="max-width:480px;">
+    <div class="modal__header">
+      <span class="modal__title">System Status</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-status-close">✕</button>
+    </div>
+    <div class="modal__body" id="status-body">
+      <!-- Filled by JS -->
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SCRIPTS — Load order: library → canvas → components → app
+  ============================================================ -->
   <script src="../dist/luminal-memory.umd.js"></script>
   <script type="module">
+    // Load the test fixture as a module and expose as global
     import { conversation35 } from '../tests/fixtures/conversation-35.js';
-
-    // ============================================================
-    // CONFIGURATION — Change these to match your setup
-    // ============================================================
-    const CONFIG = {
-      endpoint: "http://127.0.0.1:8081",  // Your llama-server address
-      apiFormat: "openai",
-      completionPath: "/v1/chat/completions",
-      model: "gemma-4-26B-A4B-it",
-      systemPrompt: "You are a helpful assistant.",
-      windowSize: 20,
-      maxTokenBudget: 32768,
-      reservedTokens: 2048,
-      memoryLimitMB: 2048
-    };
-    // ============================================================
-
-    // Initialize Luminal Memory
-    const memory = new LuminalMemory.LuminalMemory(CONFIG);
-    let ready = false;
-
-    async function initialize() {
-      await memory.init();
-
-      // Preload the test conversation as paired turn nodes
-      for (let i = 0; i < conversation35.length - 1; i += 2) {
-        const user = conversation35[i];
-        const assistant = conversation35[i + 1];
-        if (user && assistant) {
-          memory.chain.appendTurn(user.content, assistant.content);
-          const node = memory.chain.all()[memory.chain.length - 1];
-          memory.bm25.add(node);
-        }
-      }
-
-      // Render preloaded messages in the chat UI
-      for (const msg of conversation35) {
-        addMessage(msg.role, msg.content);
-      }
-
-      console.log(`[Init] Preloaded ${memory.chain.length} turn nodes from ${conversation35.length} messages`);
-      console.log(`[Init] Window: ${memory.getWindow().length}/${CONFIG.windowSize}`);
-
-      ready = true;
-      memory.on("memory-warning", (data) => {
-        addSystemMessage(`⚠️ Memory at ${Math.round(data.utilization * 100)}% (${data.usageMB.toFixed(1)} MB). Consider trimming.`);
-      });
-      updateStatus();
-    }
-    initialize();
-
-    // Send a message
-    async function sendMessage() {
-      const input = document.getElementById("user-input");
-      const msg = input.value.trim();
-      if (!msg || !ready) return;
-
-      input.value = "";
-      document.getElementById("send-btn").disabled = true;
-      addMessage("user", msg);
-
-      try {
-        // Append user query as pending node (so window includes it for context)
-        const pendingNode = memory.chain.append("user", msg);
-        memory.bm25.add(pendingNode);
-        
-        // Get sliding window
-        const windowNodes = memory.getWindow();
-        const windowIds = new Set(windowNodes.map(n => n.id));
-
-        // RETRIEVAL: search for relevant nodes outside the window
-        const searchResults = memory.bm25.search(msg, 10);
-        const recallNodes = searchResults
-          .filter(r => !windowIds.has(r.nodeId))  // only nodes NOT already in window
-          .slice(0, memory.config.maxRetrievedNodes)
-          .map(r => memory.chain.get(r.nodeId))
-          .filter(Boolean);
-
-        if (recallNodes.length > 0) {
-          console.log(`[Recall] Found ${recallNodes.length} relevant nodes outside window:`, 
-            recallNodes.map(n => `Node ${n.id} (${(n.query||n.content||"").slice(0,30)}...)`));
-        }
-
-        // Build messages with recall injected
-        const messages = memory.window.buildMessages(
-          windowNodes,
-          recallNodes,
-          CONFIG.systemPrompt
-        );
-        
-        const response = await memory.transport.complete(messages);
-        
-        // Remove the pending user node
-        memory.chain.removeById(pendingNode.id);
-        memory.bm25.remove(pendingNode.id);
-        
-        // Append as a proper turn node (user + assistant paired)
-        const turnNode = memory.chain.appendTurn(msg, response);
-        memory.bm25.add(turnNode);
-        
-        console.log(`[Node ${turnNode.id}] turn appended | tokens: ${turnNode.tokenCount}`);
-        console.log(`[Window] ${memory.getWindow().length}/${memory.config.windowSize} nodes | chain total: ${memory.chain.length}`);
-        
-        addMessage("assistant", response);
-      } catch (err) {
-        addSystemMessage(`❌ Error: ${err.message}`);
-        console.error(err);
-      }
-
-      document.getElementById("send-btn").disabled = false;
-      input.focus();
-      updateStatus();
-    }
-
-    // Trim everything before current window
-    async function trimFromHere() {
-      if (!ready) return;
-      try {
-        const result = await memory.trimFromHere();
-        if (result) {
-          addSystemMessage("✂️ History trimmed and archived.");
-        } else {
-          addSystemMessage("Nothing to trim — history is smaller than window size.");
-        }
-      } catch (err) {
-        addSystemMessage(`❌ Trim failed: ${err.message}`);
-      }
-      updateStatus();
-    }
-
-    // Branch to new session
-    async function branchSession() {
-      if (!ready) return;
-      try {
-        const key = await memory.branch();
-        if (key) {
-          addSystemMessage(`🌿 Branched to new session. Previous archived as: ${key}`);
-          document.getElementById("chat").innerHTML = "";
-        } else {
-          addSystemMessage("Nothing to branch — no history yet.");
-        }
-      } catch (err) {
-        addSystemMessage(`❌ Branch failed: ${err.message}`);
-      }
-      updateStatus();
-    }
-
-    // Search history
-    function searchHistory() {
-      const query = prompt("Search your conversation history:");
-      if (!query) return;
-      const results = memory.search(query, 5);
-      if (results.length === 0) {
-        addSystemMessage(`🔍 No results for "${query}"`);
-      } else {
-        const resultText = results.map(r =>
-          `[Node ${r.nodeId}, score: ${r.score.toFixed(2)}] ${r.node?.content?.slice(0, 100)}...`
-        ).join("\n");
-        addSystemMessage(`🔍 Results for "${query}":\n${resultText}`);
-      }
-    }
-
-    // Show status
-    function showStatus() {
-      const s = memory.status();
-      addSystemMessage(
-        `📊 Status:\n` +
-        `  Nodes: ${s.totalNodes}\n` +
-        `  Memory: ${s.memoryUsageMB} MB / ${s.limitMB} MB (${s.utilizationPercent}%)\n` +
-        `  Archive blocks: ${s.archiveBlocks}`
-      );
-    }
-
-    // Inspect full conversation manager state
-    function inspectState() {
-      const el = document.getElementById("inspector");
-      const isVisible = el.style.display !== "none";
-      if (isVisible) { el.style.display = "none"; return; }
-
-      const chain = memory.chain.all();
-      const windowNodes = memory.getWindow();
-      const windowIds = new Set(windowNodes.map(n => n.id));
-
-      // Run a search to see what would be in the recall buffer right now
-      // Use the last turn's query as the search
-      const lastTurn = [...chain].reverse().find(n => n.role === "turn" || n.role === "user");
-      const query = lastTurn ? (lastTurn.query || lastTurn.content || "") : "";
-      const searchResults = query ? memory.bm25.search(query, 10) : [];
-      
-      // Filter recall candidates: only nodes OUTSIDE the window
-      const recallCandidates = searchResults
-        .filter(r => !windowIds.has(r.nodeId))
-        .slice(0, memory.config.maxRetrievedNodes);
-
-      let output = "";
-
-      // What the AI actually sees
-      output += "═══ WHAT THE AI SEES THIS TURN ═══\n\n";
-
-      output += "── SYSTEM PROMPT ──\n";
-      output += `  "${memory.config.systemPrompt}"\n\n`;
-
-      // Recall buffer
-      output += `── RECALL BUFFER (retrieved history) ── ${recallCandidates.length} nodes\n`;
-      if (recallCandidates.length === 0) {
-        output += "  (empty — no retrieval triggered or all matches are in window)\n";
-      } else {
-        // Normalize scores to 0-1 range for readability
-        const maxScore = recallCandidates[0]?.score || 1;
-        for (const r of recallCandidates) {
-          const node = memory.chain.get(r.nodeId);
-          if (!node) continue;
-          const normalized = (r.score / maxScore).toFixed(2);
-          const bar = "█".repeat(Math.round(normalized * 10)) + "░".repeat(10 - Math.round(normalized * 10));
-          const preview = (node.query || node.content || "").slice(0, 60).replace(/\n/g, " ");
-          output += `  [Node ${node.id}] ${bar} ${normalized} "${preview}${preview.length >= 60 ? "…" : ""}"\n`;
-        }
-      }
-      output += "\n";
-
-      // Sliding window
-      output += `── SLIDING WINDOW (recent conversation) ── ${windowNodes.length}/${memory.config.windowSize} nodes\n`;
-      for (const node of windowNodes) {
-        if (node.role === "turn") {
-          const qPreview = (node.query || "").slice(0, 40).replace(/\n/g, " ");
-          const aPreview = (node.response || "").slice(0, 40).replace(/\n/g, " ");
-          output += `  [Node ${node.id}] turn: Q:"${qPreview}${qPreview.length >= 40 ? "…" : ""}" → A:"${aPreview}${aPreview.length >= 40 ? "…" : ""}"\n`;
-        } else {
-          const preview = (node.content || "").slice(0, 80).replace(/\n/g, " ");
-          output += `  [Node ${node.id}] ${node.role}: "${preview}${preview.length >= 80 ? "…" : ""}"\n`;
-        }
-      }
-      output += "\n";
-
-      // What's NOT visible
-      const outsideWindow = chain.filter(n => !windowIds.has(n.id));
-      output += `── NOT VISIBLE TO AI (in memory, outside window) ── ${outsideWindow.length} nodes\n`;
-      for (const node of outsideWindow) {
-        const preview = (node.content || "").slice(0, 80).replace(/\n/g, " ");
-        output += `  [Node ${node.id}] ${node.role}: "${preview}${preview.length >= 80 ? "…" : ""}"\n`;
-      }
-      output += "\n";
-
-      // Summary stats
-      output += "── STATS ──\n";
-      output += `  chain total: ${chain.length} nodes\n`;
-      output += `  in window: ${windowNodes.length}\n`;
-      output += `  outside window: ${outsideWindow.length}\n`;
-      output += `  recall candidates: ${recallCandidates.length}\n`;
-      output += `  archives: ${memory.compaction.markers.length} blocks\n`;
-      output += `  BM25 indexed: ${memory.bm25.docCount} docs, ${memory.bm25.index.size} unique terms\n`;
-      output += `  bloom filter: ${memory.bloom.itemCount} items\n`;
-      output += `  last query: "${query.slice(0, 50)}${query.length > 50 ? "…" : ""}"\n`;
-
-      el.textContent = output;
-      el.style.display = "block";
-    }
-
-    // UI helpers
-    function addMessage(role, content) {
-      const chat = document.getElementById("chat");
-      const div = document.createElement("div");
-      div.className = `msg ${role}`;
-      div.textContent = content;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    }
-
-    function addSystemMessage(content) {
-      const chat = document.getElementById("chat");
-      const div = document.createElement("div");
-      div.className = "msg system";
-      div.textContent = content;
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-    }
-
-    function updateStatus() {
-      const s = memory.status();
-      document.getElementById("stat-nodes").textContent = s.totalNodes;
-      document.getElementById("stat-memory").textContent = `${s.memoryUsageMB} MB`;
-      document.getElementById("stat-window").textContent = memory.getWindow().length;
-      document.getElementById("stat-archives").textContent = s.archiveBlocks;
-    }
-
-    // Enter key to send
-    document.getElementById("user-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") sendMessage();
-    });
-
-    // Button event listeners (module scope — can't use inline onclick)
-    document.getElementById("send-btn").addEventListener("click", sendMessage);
-    document.getElementById("btn-trim").addEventListener("click", trimFromHere);
-    document.getElementById("btn-branch").addEventListener("click", branchSession);
-    document.getElementById("btn-search").addEventListener("click", searchHistory);
-    document.getElementById("btn-status").addEventListener("click", showStatus);
-    document.getElementById("btn-inspect").addEventListener("click", inspectState);
+    window.conversation35 = conversation35;
+    window.dispatchEvent(new Event('fixture-ready'));
   </script>
+  <script src="ui/js/canvas.js"></script>
+  <script src="ui/js/components/modal.js"></script>
+  <script src="ui/js/components/topbar.js"></script>
+  <script src="ui/js/components/chat.js"></script>
+  <script src="ui/js/components/input.js"></script>
+  <script src="ui/js/components/toolbar.js"></script>
+  <script src="ui/js/components/search-modal.js"></script>
+  <script src="ui/js/components/inspect-modal.js"></script>
+  <script src="ui/js/components/status-modal.js"></script>
+  <script src="ui/js/app.js"></script>
 </body>
 </html>

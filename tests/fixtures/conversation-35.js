@@ -18,7 +18,7 @@
  *   - k1=1.2 b=0.4 BM25 params (turn 9)
  *   - Secret code word "pineapple" (turn 7) — needle in a haystack test
  */
-export const conversation35 = [
+var conversation35 = [
   // === TURNS 1-10: Python/BM25 coding ===
   { role: "user", content: "hey, im working on a python project and i keep getting an import error" },
   { role: "assistant", content: "Hey! Import errors are usually one of a few things — wrong module name, missing install, or a path issue. Can you paste the exact error message?" },
@@ -165,3 +165,6 @@ export const conversation35 = [
   { role: "user", content: "will do. catch you later" },
   { role: "assistant", content: "Later! Good luck with the build this weekend. And remember — pineapple." }
 ];
+
+// ES module export (for Node.js tests using import syntax)
+export { conversation35 };
