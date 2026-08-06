@@ -119,20 +119,32 @@ const Chat = (function () {
     header.appendChild(pill2);
     body.appendChild(header);
 
-    // Think block (dimmed, shows when tokens arrive)
-    const thinkWrapper = document.createElement('div');
+    // Think block (collapsible, greyed out)
+    const thinkWrapper = document.createElement('details');
     thinkWrapper.className = 'tool-block';
     thinkWrapper.style.marginBottom = '10px';
-    thinkWrapper.style.opacity = '0.5';
-    const thinkHeader = document.createElement('div');
-    thinkHeader.className = 'tool-block__header';
-    thinkHeader.innerHTML = '<span>[ THINKING ]</span><span class="tool-block__reward">reasoning</span>';
+    thinkWrapper.style.opacity = '0.6';
+    thinkWrapper.open = false; // collapsed by default, user can expand to see reasoning
+    const thinkHeader = document.createElement('summary');
+    thinkHeader.style.cursor = 'pointer';
+    thinkHeader.style.fontFamily = 'var(--font-mono)';
+    thinkHeader.style.fontSize = '10px';
+    thinkHeader.style.fontWeight = '700';
+    thinkHeader.style.color = 'var(--color-text-muted)';
+    thinkHeader.style.textTransform = 'uppercase';
+    thinkHeader.style.letterSpacing = '0.5px';
+    thinkHeader.style.padding = '6px 0';
+    thinkHeader.textContent = '[ THINKING ] — click to collapse';
     const thinkContent = document.createElement('div');
     thinkContent.style.whiteSpace = 'pre-wrap';
-    thinkContent.style.maxHeight = '150px';
+    thinkContent.style.maxHeight = '200px';
     thinkContent.style.overflowY = 'auto';
     thinkContent.style.fontSize = '11px';
+    thinkContent.style.lineHeight = '1.5';
+    thinkContent.style.color = 'var(--color-text-secondary)';
+    thinkContent.style.padding = '8px 0';
     thinkContent.textContent = 'waiting for reasoning...';
+    thinkWrapper.style.opacity = '0.6';
     thinkWrapper.appendChild(thinkHeader);
     thinkWrapper.appendChild(thinkContent);
     body.appendChild(thinkWrapper);

@@ -185,6 +185,9 @@ export class LuminalMemory {
 
       // Clean up common model formatting issues before parsing
       let cleaned = decision
+        .replace(/<\|channel>thought<channel\|>[\s\S]*?<\|channel>response<channel\|>/g, '') // strip channel thinking
+        .replace(/<\|channel>\w+<channel\|>/g, '') // strip any remaining channel tags
+        .replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>/g, '') // strip think tags
         .replace(/```json\s*/gi, '')   // strip markdown json fences
         .replace(/```\s*/g, '')        // strip closing fences
         .replace(/^\s*`+|`+\s*$/g, '') // strip stray backticks
