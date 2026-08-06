@@ -10,7 +10,6 @@ import { Buffer, SlidingBuffer, RecallBuffer } from "./core/buffer.js";
 import { ConversationManager } from "./core/conversation-manager.js";
 import { Compaction } from "./core/compaction.js";
 import { Retrieval } from "./core/retrieval.js";
-import { DeepRetrieval } from "./core/deep-retrieval.js";
 import { BM25 } from "./search/bm25.js";
 import { BloomFilter } from "./search/bloom.js";
 import { TfIdf } from "./search/tfidf.js";
@@ -19,6 +18,8 @@ import { Archive } from "./storage/archive.js";
 import { LLMTransport } from "./transport/llm.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { Tool } from "./tools/base.js";
+import { Pocket } from "./core/pocket.js";
+import { Settings } from "./core/settings.js";
 
 export class LuminalMemory {
   constructor(userConfig = {}) {
@@ -43,6 +44,12 @@ export class LuminalMemory {
 
     // Tool system
     this.toolRegistry = new ToolRegistry(this.config);
+
+    // Pocket — parallel instruction queue
+    this.pocket = new Pocket();
+
+    // Settings — runtime config management with schema
+    this.settings = new Settings(this.config, this.transport);
 
     this._initialized = false;
   }
@@ -105,44 +112,40 @@ export class LuminalMemory {
     }
 
     // 4. Retrieve relevant historical nodes (pure math — BM25 + bloom + TF-IDF)
-    const { nodes: retrievedNodes, deepResponse } = await this.retrieval.retrieve(
+    const { nodes: retrievedNodes } = await this.retrieval.retrieve(
       message, this.window.select(this.chain)
     );
 
-    // 5. If deep retrieval handled it, use that response directly
+    // 5. Build prompt with tool results + recall + sliding window
     let response;
-    if (deepResponse) {
-      response = deepResponse;
-    } else {
-      // 6. Build prompt with tool results + recall + sliding window
-      const scoredRetrieved = retrievedNodes.map((node, i) => ({
-        node,
-        score: retrievedNodes.length - i
-      }));
+    const scoredRetrieved = retrievedNodes.map((node, i) => ({
+      node,
+      score: retrievedNodes.length - i
+    }));
 
-      const { messages } = this.conversationManager.buildPrompt(
-        this.chain.all(),
-        scoredRetrieved
-      );
+    const { messages } = this.conversationManager.buildPrompt(
+      this.chain.all(),
+      scoredRetrieved
+    );
 
-      // Inject tool results before the user's message if any
-      if (toolResults.length > 0) {
-        const toolContext = toolResults.map(t => {
-          const resultText = typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2);
-          return `[Tool: ${t.name}]\n${resultText}`;
-        }).join("\n\n");
+    // Inject tool results before the user's message if any
+    if (toolResults.length > 0) {
+      const toolContext = toolResults.map(t => {
+        const resultText = typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2);
+        return `[Tool: ${t.name}]\n${resultText}`;
+      }).join("\n\n");
 
-        // Insert tool context as a system message before the last user message
-        const lastIdx = messages.length - 1;
-        messages.splice(lastIdx, 0, {
-          role: "system",
-          content: `The following tool was used to gather information for this response:\n\n${toolContext}`
-        });
-      }
-
-      // 7. Call LLM
-      response = await this.transport.complete(messages);
+      // Insert tool context as a system message before the last user message
+      const lastIdx = messages.length - 1;
+      messages.splice(lastIdx, 0, {
+        role: "system",
+        content: `The following tool was used to gather information for this response:\n\n${toolContext}`
+      });
     }
+
+    // 6. Call LLM
+    const result = await this.transport.complete(messages);
+    response = result.text;
 
     // 8. Append assistant response as new node
     const assistantNode = this.chain.append("assistant", response);
@@ -180,7 +183,7 @@ export class LuminalMemory {
     ];
 
     try {
-      const decision = await this.transport.complete(messages);
+      const { text: decision } = await this.transport.complete(messages);
       console.log(`[Chat] Tool decision raw: ${decision.slice(0, 300)}`);
 
       // Clean up common model formatting issues before parsing
@@ -247,6 +250,23 @@ export class LuminalMemory {
    */
   registerTool(tool) {
     this.toolRegistry.register(tool);
+  }
+
+  /**
+   * Add a pocket note (correction/annotation) to an existing node.
+   * Re-indexes the node in BM25 so the correction is searchable.
+   * @param {number} nodeId
+   * @param {string} note - the correction text
+   * @returns {object|null} the updated node
+   */
+  addPocketNote(nodeId, note) {
+    const node = this.chain.addPocketNote(nodeId, note);
+    if (node) {
+      // Re-index so the correction terms are searchable
+      this.bm25.remove(nodeId);
+      this.bm25.add(node);
+    }
+    return node;
   }
 
   /**
@@ -464,7 +484,6 @@ export { Buffer, SlidingBuffer, RecallBuffer } from "./core/buffer.js";
 export { ConversationManager } from "./core/conversation-manager.js";
 export { Compaction } from "./core/compaction.js";
 export { Retrieval } from "./core/retrieval.js";
-export { DeepRetrieval } from "./core/deep-retrieval.js";
 export { BM25 } from "./search/bm25.js";
 export { BloomFilter } from "./search/bloom.js";
 export { TfIdf } from "./search/tfidf.js";
@@ -477,3 +496,5 @@ export { ToolRegistry } from "./tools/registry.js";
 export { createWebSearchTool } from "./extensions/web-search.js";
 export { createDateTimeTool } from "./extensions/datetime.js";
 export { createProjectGrepTool as createExplorerTool } from "./extensions/explorer.js";
+export { Pocket } from "./core/pocket.js";
+export { Settings } from "./core/settings.js";

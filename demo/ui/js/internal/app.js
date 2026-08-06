@@ -9,27 +9,56 @@
   'use strict';
 
   // === Config ===
+  // Demo-specific overrides. Everything else comes from the library's defaultConfig.
   var CONFIG = {
     endpoint: 'http://127.0.0.1:8081',
     apiFormat: 'openai',
     completionPath: '/v1/chat/completions',
     model: 'gemma-4-26B-A4B-it',
     thinking: false,
-    systemPrompt: 'You are Liminal, a conversational AI assistant. Chat naturally with the user like a knowledgeable friend. When context from earlier conversation appears in the prompt (labeled Recalled), use that information first. When tool results appear, incorporate them into your answer. Always prioritize information from recalled nodes and tools over your own knowledge. But when no recalled context or tool results are present, just chat — share thoughts, ask questions, discuss ideas, be helpful. Never refuse to answer. Never say you cannot help. If you lack specific information, give your best understanding and say what you are unsure about. Keep responses concise unless the user asks for detail.',
-    windowSize: 40,
-    maxTokenBudget: 32768,
-    reservedTokens: 4096,
     maxRetrievedNodes: 6,
     recallBufferRatio: 0.2,
     retrievalThreshold: 0.2,
-    toolMatchThreshold: 0.5,
-    memoryLimitMB: 2048
+    toolMatchThreshold: 0.5
   };
 
   // === State ===
   var memory = new LuminalMemory.LuminalMemory(CONFIG);
+  // CONFIG is now the merged config from the library (has all defaults filled in)
+  CONFIG = memory.config;
+  window._luminalMemory = memory; // expose for pocket notes
   var ready = false;
   var llmAvailable = false;
+
+  // Stream abort + regeneration state
+  var currentAbort = null;      // AbortController for active stream
+  var lastMessages = null;      // last prompt messages (for regeneration)
+  var lastPendingNode = null;   // pending node being processed
+  var lastPartialResponse = ''; // what the LLM wrote before abort
+  var lastStreamMsg = null;     // streaming UI element
+
+  // Pocket queue display (top-level so both init and handleSend can access)
+  function updatePocketQueueDisplay() {
+    var queueEl = document.getElementById('pocket-queue');
+    if (!queueEl) return;
+    var items = queueEl.querySelectorAll('.pocket-queue__item');
+    items.forEach(function (el) { el.remove(); });
+
+    // Only show PENDING notes — consumed ones disappear entirely
+    var pending = memory.pocket.queue;
+    if (pending.length === 0) {
+      queueEl.classList.remove('pocket-queue--active');
+      return;
+    }
+
+    queueEl.classList.add('pocket-queue--active');
+    pending.forEach(function (n) {
+      var item = document.createElement('div');
+      item.className = 'pocket-queue__item';
+      item.textContent = '#' + n.id + ' ' + n.content.slice(0, 50) + (n.content.length > 50 ? '...' : '');
+      queueEl.appendChild(item);
+    });
+  }
 
   // === Test conversation fixture — loaded via module script into window.conversation35 ===
   var conversation = null;
@@ -80,6 +109,7 @@
   async function init() {
     // Init all components
     Topbar.init();
+    Topbar.setConfig(CONFIG);
     Chat.init();
     Modal.init();
 
@@ -159,6 +189,7 @@
     SearchModal.init(memory);
     InspectModal.init(memory);
     StatusModal.init(memory);
+    SettingsModal.init(memory);
     Input.init(handleSend);
     Toolbar.init({
       onTrim: handleTrim,
@@ -177,6 +208,80 @@
     memory.registerTool(grep);
     console.log('[Init] Tools registered: web_search, datetime, project_explorer');
 
+    // Pocket note — queue-based. Notes accumulate and get consumed at checkpoints.
+    var pocketMode = false;
+    var inputBox = document.querySelector('.input-box');
+
+    function activatePocketMode() {
+      pocketMode = true;
+      inputBox.classList.add('input-box--pocket-mode');
+      var input = document.getElementById('user-input');
+      input.placeholder = 'Queue a pocket note (Enter to add, Esc to exit)...';
+      input.value = '';
+      input.focus();
+      Topbar.setStatus('active', 'POCKET (' + memory.pocket.pending + ' queued)');
+    }
+
+    function exitPocketMode() {
+      pocketMode = false;
+      inputBox.classList.remove('input-box--pocket-mode');
+      var input = document.getElementById('user-input');
+      input.placeholder = 'Type a message...';
+      Topbar.setStatus('active', memory.pocket.pending > 0 ? 'READY (' + memory.pocket.pending + ' notes)' : 'READY');
+    }
+
+    function queuePocketNote() {
+      var input = document.getElementById('user-input');
+      var note = input.value.trim();
+      if (!note) return;
+
+      var noteObj = memory.pocket.add(note);
+      input.value = '';
+
+      // Add to staging area (pinned to bottom of chat)
+      var staging = document.getElementById('pocket-staging');
+      var noteEl = document.createElement('div');
+      noteEl.className = 'pocket-staging__note';
+      noteEl.id = 'pocket-staged-' + noteObj.id;
+      noteEl.innerHTML = '<div class="pocket-staging__label">\u270E queued #' + noteObj.id + '</div>' + note;
+      staging.appendChild(noteEl);
+
+      // Update right-side queue display
+      updatePocketQueueDisplay();
+
+      Topbar.setStatus('active', 'POCKET (' + memory.pocket.pending + ' queued)');
+      console.log('[Pocket] Queued: "' + note + '" (' + memory.pocket.pending + ' pending)');
+    }
+
+
+    // Button click toggles pocket mode
+    document.getElementById('pocket-note-btn').addEventListener('click', function () {
+      if (pocketMode) exitPocketMode();
+      else activatePocketMode();
+    });
+
+    // Ctrl+Q shortcut
+    document.addEventListener('keydown', function (e) {
+      if (e.ctrlKey && e.key === 'q') {
+        e.preventDefault();
+        if (pocketMode) exitPocketMode();
+        else activatePocketMode();
+      }
+      // Esc exits pocket mode
+      if (e.key === 'Escape' && pocketMode) {
+        exitPocketMode();
+      }
+    });
+
+    // Enter in pocket mode queues the note (doesn't send as chat)
+    document.getElementById('user-input').addEventListener('keydown', function (e) {
+      if (pocketMode && e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        queuePocketNote();
+      }
+    });
+
     // Memory warning listener
     memory.on('memory-warning', function (data) {
       Chat.renderSystem('\u26A0\uFE0F Memory at ' + Math.round(data.utilization * 100) + '% (' + data.usageMB.toFixed(1) + ' MB). Consider trimming.');
@@ -185,6 +290,17 @@
     ready = true;
     Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
     refreshStats();
+
+    // Live-update sidebar when settings change, and re-check LLM connectivity on backend switch
+    var _recheckTimer = null;
+    memory.settings.onChange(function (key) {
+      refreshStats();
+      if (key === 'endpoint' || key === 'apiFormat' || key === 'model') {
+        // Debounce — wait for all 3 fields to settle before checking
+        clearTimeout(_recheckTimer);
+        _recheckTimer = setTimeout(recheckLLM, 150);
+      }
+    });
 
     if (!llmAvailable) {
       Chat.renderSystem('\u26A1 No LLM server at ' + CONFIG.endpoint + ' \u2014 using mock responses. Memory/search/retrieval are all real.');
@@ -280,6 +396,7 @@
 
       // Build real prompt
       var messages = memory.window.buildMessages(windowNodes, recallNodes, CONFIG.systemPrompt);
+      console.log('[Prompt] System prompt (' + (CONFIG.systemPrompt || '').length + ' chars): ' + (CONFIG.systemPrompt || '').slice(0, 80) + '...');
 
       // Inject tool results into prompt if any
       if (toolResults.length > 0) {
@@ -314,6 +431,20 @@
 
       var response;
       if (llmAvailable) {
+        // CHECKPOINT: consume ONE pending pocket note and inject into prompt
+        if (memory.pocket.hasPending) {
+          var pocketNote = memory.pocket.consume();
+          // Inject before the last message
+          var insertIdx = messages.length - 1;
+          messages.splice(insertIdx, 0, {
+            role: 'system',
+            content: '[Pocket Note #' + pocketNote.id + ']: ' + pocketNote.content
+          });
+          Chat.renderSystem('\u2713 Pocket note #' + pocketNote.id + ' applied');
+          updatePocketQueueDisplay();
+          console.log('[Pocket] Consumed note #' + pocketNote.id + ' at pre-LLM checkpoint');
+        }
+
         // Fix role alternation: convert system→user (except first), then merge consecutive same-role
         var fixedMessages = [];
         messages.forEach(function (m, i) {
@@ -328,28 +459,37 @@
         });
         messages = fixedMessages;
 
-        // Calculate tokens being sent to LLM
+        // Show estimated tokens immediately (will be overwritten with real count after stream)
         var sentTokens = 0;
         messages.forEach(function (m) {
           sentTokens += Math.ceil((m.content || '').length / 4);
         });
         var sideSent = document.getElementById('side-sent');
-        if (sideSent) sideSent.textContent = sentTokens.toLocaleString();
-        console.log('[Prompt] Sending ~' + sentTokens + ' tokens to LLM (' + messages.length + ' messages)');
+        if (sideSent) sideSent.textContent = '~' + sentTokens.toLocaleString();
+        console.log('[Prompt] Estimated ~' + sentTokens + ' tokens (' + messages.length + ' messages), awaiting real count from server...');
 
         // Stream response with live thinking + token display
         var streamMsg = Chat.createStreamingMessage(memory.chain.length + 1);
+        lastStreamMsg = streamMsg;
+        lastPartialResponse = '';
         if (!CONFIG.thinking && streamMsg && streamMsg.thinkWrapper) {
           streamMsg.thinkWrapper.querySelector('div').textContent = 'thinking disabled \u2014 model does not support reasoning or it is turned off';
           streamMsg.thinkWrapper.style.opacity = '0.35';
           streamMsg.thinkWrapper.open = false;
         }
-        response = await memory.transport.stream(messages, {
+
+        // Store for potential pocket note regeneration
+        lastMessages = messages;
+        currentAbort = new AbortController();
+
+        var streamResult = await memory.transport.stream(messages, {
           onThink: function (token) { if (streamMsg) streamMsg.appendThink(token); },
           onToken: function (token) {
-            // Strip any channel tags that leak into content
             var clean = token.replace(/<\|channel>\w+\s*<channel\|>/g, '');
-            if (clean && streamMsg) streamMsg.appendContent(clean);
+            if (clean) {
+              lastPartialResponse += clean;
+              if (streamMsg) streamMsg.appendContent(clean);
+            }
           },
           onDone: function (full, think) {
             if (think) console.log('[LLM:think] ' + think.slice(0, 200));
@@ -359,7 +499,16 @@
               .trim();
             if (streamMsg) streamMsg.finalize(cleaned);
           }
-        });
+        }, currentAbort.signal);
+        response = streamResult.text;
+        currentAbort = null;
+
+        // Display real token usage from server if available
+        if (streamResult.usage) {
+          var sideSent = document.getElementById('side-sent');
+          if (sideSent) sideSent.textContent = streamResult.usage.promptTokens.toLocaleString();
+          console.log('[Prompt] Real usage from server: prompt=' + streamResult.usage.promptTokens + ' completion=' + streamResult.usage.completionTokens + ' total=' + streamResult.usage.totalTokens);
+        }
       } else {
         await new Promise(function (r) { setTimeout(r, 400 + Math.random() * 600); });
         response = getMockResponse(msg);
@@ -382,10 +531,38 @@
       Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
 
       console.log('[Node ' + turnNode.id + '] appended | chain: ' + memory.chain.length + ' | window: ' + memory.getWindow().length);
+
+      // POST-RESPONSE CHECKPOINT: consume ONE note, move from staging to chat, re-run
+      if (memory.pocket.hasPending) {
+        var postNote = memory.pocket.consume();
+
+        // Move from staging into the chat flow
+        var stagedEl = document.getElementById('pocket-staged-' + postNote.id);
+        if (stagedEl) {
+          stagedEl.remove();
+        }
+        var chatStream = document.getElementById('chat-stream');
+        var notePanel = document.createElement('div');
+        notePanel.className = 'pocket-note-panel';
+        notePanel.innerHTML = '<div class="pocket-note-panel__label">\u270E Note #' + postNote.id + ' \u2014 applied</div>' + postNote.content;
+        chatStream.appendChild(notePanel);
+        chatStream.scrollTop = chatStream.scrollHeight;
+
+        updatePocketQueueDisplay();
+
+        // Wait for current response to settle, then process next note
+        await new Promise(function (r) { setTimeout(r, 200); });
+        await handleSend(postNote.content);
+      }
     } catch (err) {
-      Chat.renderSystem('\u274C Error: ' + err.message);
-      Topbar.setStatus('idle', 'ERROR');
-      console.error(err);
+      // AbortError is expected when pocket note interrupts — don't show as error
+      if (err.name === 'AbortError') {
+        console.log('[Stream] Aborted (pocket note or user cancel)');
+      } else {
+        Chat.renderSystem('\u274C Error: ' + err.message);
+        Topbar.setStatus('idle', 'ERROR');
+        console.error(err);
+      }
     }
 
     Input.enable();
@@ -462,6 +639,38 @@
     Topbar.updateStats(s.totalNodes, memory.getWindow().length, s.memoryUsageMB, s.totalTokens);
     var sideArchives = document.getElementById('side-archives');
     if (sideArchives) sideArchives.textContent = s.archiveBlocks;
+  }
+
+  // === Re-check LLM availability after backend/model change ===
+  var _recheckAbort = null;
+  async function recheckLLM() {
+    // Abort any in-flight check
+    if (_recheckAbort) _recheckAbort.abort();
+    _recheckAbort = new AbortController();
+
+    var endpoint = memory.config.endpoint;
+    var apiFormat = memory.config.apiFormat;
+
+    try {
+      var checkUrl;
+      if (apiFormat === 'ollama') {
+        checkUrl = endpoint + '/api/tags';
+      } else {
+        checkUrl = endpoint + '/v1/models';
+      }
+      var res = await fetch(checkUrl, { signal: _recheckAbort.signal });
+      llmAvailable = res.ok;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // superseded by newer check
+      llmAvailable = false;
+    }
+
+    _recheckAbort = null;
+    Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
+    if (llmAvailable) {
+      Chat.renderSystem('\u2713 Connected to ' + apiFormat + ' at ' + endpoint + (memory.config.model ? ' (' + memory.config.model + ')' : ''));
+    }
+    console.log('[Settings] Backend changed: ' + apiFormat + ' @ ' + endpoint + ' | available: ' + llmAvailable);
   }
 
   // Boot is triggered by fixture-ready event above

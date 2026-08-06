@@ -28,6 +28,7 @@ export class Chain {
       content,
       timestamp: Date.now(),
       tokenCount: estimateTokens(content),
+      pocketNotes: [],
       metadata
     };
     this.nodes.push(node);
@@ -52,10 +53,32 @@ export class Chain {
       content,
       timestamp: Date.now(),
       tokenCount: estimateTokens(content),
+      pocketNotes: [],
       metadata
     };
     this.nodes.push(node);
     this.nextId++;
+    return node;
+  }
+
+  /**
+   * Add a pocket note (correction/annotation) to an existing node.
+   * Re-estimates token count to include the note.
+   * @param {number} nodeId
+   * @param {string} note - the correction text
+   * @returns {object|null} the updated node, or null if not found
+   */
+  addPocketNote(nodeId, note) {
+    const node = this.get(nodeId);
+    if (!node) return null;
+    if (!node.pocketNotes) node.pocketNotes = [];
+    node.pocketNotes.push({
+      timestamp: Date.now(),
+      content: note
+    });
+    // Update token count to reflect the added note
+    const fullContent = node.content + ' ' + node.pocketNotes.map(n => n.content).join(' ');
+    node.tokenCount = estimateTokens(fullContent);
     return node;
   }
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Luminal Memory</title>
-  <link rel="stylesheet" href="ui/css/main.css">
+  <link rel="stylesheet" href="ui/css/index.css">
 </head>
 <body>
 
@@ -124,7 +124,7 @@
       </div>
       <div class="sidebar-stats__item">
         <span>window</span>
-        <span class="sidebar-stats__value" id="side-window">0/40</span>
+        <span class="sidebar-stats__value" id="side-window">0</span>
       </div>
       <div class="sidebar-stats__item">
         <span>memory</span>
@@ -147,6 +147,11 @@
       <div class="context-info__selection" id="context-selection" style="display:none;"></div>
     </div>
 
+    <!-- Pocket queue display (right whitespace) -->
+    <div class="pocket-queue" id="pocket-queue">
+      <div class="pocket-queue__title">Pocket Queue</div>
+    </div>
+
     <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar__brand">
@@ -157,6 +162,9 @@
         <span class="topbar__version">v1.0</span>
       </div>
       <div class="topbar__status">
+        <button class="btn-icon btn-icon--ghost" id="btn-settings" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <span><span class="topbar__dot" id="status-dot"></span> <span id="status-label">IDLE</span></span>
       </div>
     </header>
@@ -180,17 +188,24 @@
           <!-- Messages render here -->
         </div>
 
+        <!-- Pocket staging area — sits between chat and input -->
+        <div class="pocket-staging" id="pocket-staging"></div>
+
         <!-- Input -->
         <div class="input-area">
           <div class="input-box">
             <textarea class="input-box__textarea" id="user-input" placeholder="Type a message..." rows="1"></textarea>
+            <span class="pocket-mode-label" id="pocket-mode-label">✎ POCKET NOTE — Enter to send correction</span>
             <div class="input-box__actions">
               <div class="input-box__pills">
                 <button class="pill-btn active" id="pill-auto">░ Auto</button>
                 <button class="pill-btn" id="pill-recall">⠶ Recall</button>
                 <button class="pill-btn" id="pill-deep">⣿ Deep</button>
               </div>
-              <button class="btn-icon btn-icon--accent" id="send-btn" title="Send">→</button>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <button class="btn-icon btn-icon--ghost" id="pocket-note-btn" title="Add pocket note / correction (Ctrl+Q)">✎</button>
+                <button class="btn-icon btn-icon--accent" id="send-btn" title="Send">→</button>
+              </div>
             </div>
           </div>
         </div>
@@ -258,11 +273,24 @@
     </div>
   </div>
 
+  <!-- Modal: Settings -->
+  <div class="modal-backdrop" id="modal-settings-backdrop"></div>
+  <div class="modal modal--settings" id="modal-settings">
+    <div class="modal__header">
+      <span class="modal__title">⚙ Settings</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-settings-close">✕</button>
+    </div>
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settings-nav"></nav>
+      <div class="settings-content" id="settings-body"></div>
+    </div>
+  </div>
+
   <!-- ============================================================
        SCRIPTS — Load order: library → canvas → components → app
   ============================================================ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/lib/marked.umd.min.js"></script>
-  <script src="ui/js/vendor/gifuct.js"></script>
+  <script src="ui/js/internal/vendor/gifuct.js"></script>
   <script src="../dist/luminal-memory.umd.js"></script>
   <script type="module">
     // Load the demo knowledge base fixture and expose as global
@@ -270,18 +298,19 @@
     window.conversation35 = demoConversation;
     window.dispatchEvent(new Event('fixture-ready'));
   </script>
-  <script src="ui/js/canvas.js"></script>
-  <script src="ui/js/components/modal.js"></script>
-  <script src="ui/js/components/topbar.js"></script>
-  <script src="ui/js/components/chat.js"></script>
-  <script src="ui/js/components/input.js"></script>
-  <script src="ui/js/components/toolbar.js"></script>
-  <script src="ui/js/components/search-modal.js"></script>
-  <script src="ui/js/components/inspect-modal.js"></script>
-  <script src="ui/js/components/status-modal.js"></script>
-  <script src="ui/js/components/selection-mode.js"></script>
-  <script src="ui/js/components/recall-fx.js"></script>
-  <script src="ui/js/tools/toolchain.js"></script>
-  <script src="ui/js/app.js"></script>
+  <script src="ui/js/internal/canvas.js"></script>
+  <script src="ui/js/internal/components/modal.js"></script>
+  <script src="ui/js/internal/components/topbar.js"></script>
+  <script src="ui/js/internal/components/chat.js"></script>
+  <script src="ui/js/internal/components/input.js"></script>
+  <script src="ui/js/internal/components/toolbar.js"></script>
+  <script src="ui/js/internal/components/search-modal.js"></script>
+  <script src="ui/js/internal/components/inspect-modal.js"></script>
+  <script src="ui/js/internal/components/status-modal.js"></script>
+  <script src="ui/js/internal/components/settings-modal.js"></script>
+  <script src="ui/js/internal/components/selection-mode.js"></script>
+  <script src="ui/js/internal/components/recall-fx.js"></script>
+  <script src="ui/js/internal/tools/toolchain.js"></script>
+  <script src="ui/js/internal/app.js"></script>
 </body>
 </html>

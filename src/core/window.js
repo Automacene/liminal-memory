@@ -72,11 +72,22 @@ export class Window {
       } else if (node.role === "turn") {
         // Turn nodes contain both query and response — split back into messages
         if (node.query) messages.push({ role: "user", content: node.query });
-        if (node.response) messages.push({ role: "assistant", content: node.response });
+        let responseContent = node.response || '';
+        // Append pocket notes inline with the response
+        if (node.pocketNotes && node.pocketNotes.length > 0) {
+          const notes = node.pocketNotes.map(n => `[Correction]: ${n.content}`).join('\n');
+          responseContent += '\n' + notes;
+        }
+        if (responseContent) messages.push({ role: "assistant", content: responseContent });
       } else {
+        let content = node.content;
+        if (node.pocketNotes && node.pocketNotes.length > 0) {
+          const notes = node.pocketNotes.map(n => `[Correction]: ${n.content}`).join('\n');
+          content += '\n' + notes;
+        }
         messages.push({
           role: node.role,
-          content: node.content
+          content: content
         });
       }
     }

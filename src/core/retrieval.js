@@ -2,11 +2,8 @@
  * Retrieval Engine — orchestrates the search pipeline.
  * 1. BM25 on active window
  * 2. If low confidence → bloom filter gate → TF-IDF rank → decompress → BM25 inner
- * 3. If multiple blocks → deep retrieval (hierarchical branching)
- * 4. Returns relevant historical nodes or triggers deep retrieval for synthesis
+ * 3. Returns relevant historical nodes for injection into the prompt
  */
-import { DeepRetrieval } from "./deep-retrieval.js";
-
 export class Retrieval {
   constructor(chain, bm25, bloom, tfidf, compaction, archive, transport, config) {
     this.chain = chain;
@@ -17,7 +14,6 @@ export class Retrieval {
     this.archive = archive;
     this.transport = transport;
     this.config = config;
-    this.deepRetrieval = new DeepRetrieval(transport, config);
   }
 
   /**
@@ -58,31 +54,7 @@ export class Retrieval {
     // Filter to blocks with non-zero scores
     const relevantBlocks = ranked.filter(r => r.score > 0);
 
-    // Step 4: Check if deep retrieval should activate
-    if (this.deepRetrieval.shouldActivate(relevantBlocks.map(r => r.key))) {
-      // Deep retrieval: decompress all relevant blocks, branch and synthesize
-      const decompressedBlocks = [];
-      for (const block of relevantBlocks.slice(0, this.config.maxBranches || 7)) {
-        const nodes = await this.archive.retrieve(block.key);
-        if (nodes && nodes.length > 0) {
-          decompressedBlocks.push({ key: block.key, nodes });
-        }
-      }
-
-      if (decompressedBlocks.length >= this.config.deepRetrievalThreshold) {
-        const deepResponse = await this.deepRetrieval.execute(
-          query,
-          windowNodes,
-          decompressedBlocks,
-          this.config.systemPrompt
-        );
-        if (deepResponse) {
-          return { nodes: [], deepResponse };
-        }
-      }
-    }
-
-    // Step 5: Simple retrieval — decompress top candidates and search within
+    // Step 4: Simple retrieval — decompress top candidates and search within
     const results = [];
     const maxBlocks = Math.min(2, relevantBlocks.length);
 
