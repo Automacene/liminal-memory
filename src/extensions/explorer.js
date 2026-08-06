@@ -16,7 +16,7 @@ export function createProjectGrepTool(config = {}) {
 
   return new Tool({
     name: "project_explorer",
-    description: "Explore the Luminal Memory project repository. Can read source files, list directory contents, or search for code patterns across the codebase. Use when you need to find where something is implemented, read a specific file, show code, or understand the project layout. [Synonyms: read file, show code, open file, find in code, search source, grep, look at, project structure, codebase, repo, repository, source code, implementation, where is, how does]",
+    description: "Read or search project source code files. Trigger phrases: show me the code, read the file, look at the source, search the codebase, grep for, find in the code, what file has, open the file, show source.",
     parameters: {
       type: "object",
       properties: {

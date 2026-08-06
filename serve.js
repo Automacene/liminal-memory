@@ -147,6 +147,145 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // === API: Web Search via DuckDuckGo HTML ===
+  if (pathname === "/api/websearch") {
+    const query = url.searchParams.get("q") || "";
+    if (!query) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ results: [], formatted: "No query." }));
+      return;
+    }
+
+    try {
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const ddgRes = await fetch(ddgUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+      });
+      const html = await ddgRes.text();
+
+      // Parse DDG results — extract links and snippets
+      const results = [];
+      const resultRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      let match;
+      while ((match = resultRegex.exec(html)) !== null && results.length < 5) {
+        const href = decodeURIComponent(match[1].replace(/.*uddg=/, '').replace(/&.*/, ''));
+        const title = match[2].replace(/<[^>]+>/g, '').trim();
+        const snippet = match[3].replace(/<[^>]+>/g, '').trim();
+        if (href.startsWith('http')) {
+          results.push({ url: href, title, snippet });
+        }
+      }
+
+      // Fallback: simpler regex if the above didn't match
+      if (results.length === 0) {
+        const linkRegex = /<a[^>]+class="result__url"[^>]*href="([^"]+)"[^>]*>/g;
+        const titleRegex = /<a[^>]+class="result__a"[^>]*>([^<]+)<\/a>/g;
+        let linkMatch, titleMatch;
+        while ((linkMatch = linkRegex.exec(html)) !== null && results.length < 5) {
+          titleMatch = titleRegex.exec(html);
+          const href = decodeURIComponent(linkMatch[1].replace(/.*uddg=/, '').replace(/&.*/, ''));
+          if (href.startsWith('http')) {
+            results.push({ url: href, title: titleMatch ? titleMatch[1].trim() : href, snippet: '' });
+          }
+        }
+      }
+
+      const formatted = results.length > 0
+        ? results.map((r, i) => `[${i+1}] **${r.title}**\n${r.snippet}\n${r.url}`).join('\n\n')
+        : 'No results found.';
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results, formatted }));
+    } catch (err) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ results: [], formatted: "Search failed: " + err.message }));
+    }
+    return;
+  }
+
+  // === API: Fetch & Parse URL to Markdown ===
+  if (pathname === "/api/fetch") {
+    const targetUrl = url.searchParams.get("url") || "";
+    if (!targetUrl) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ formatted: "No URL." }));
+      return;
+    }
+
+    try {
+      const pageRes = await fetch(targetUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(8000)
+      });
+      const html = await pageRes.text();
+
+      // Parse headings and paragraphs into markdown
+      let markdown = '';
+      
+      // Extract title
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (titleMatch) markdown += `# ${titleMatch[1].trim()}\n\n`;
+
+      // Extract headings (h1-h4) and paragraphs
+      const contentRegex = /<(h[1-4]|p|li)[^>]*>([\s\S]*?)<\/\1>/gi;
+      let contentMatch;
+      while ((contentMatch = contentRegex.exec(html)) !== null) {
+        const tag = contentMatch[1].toLowerCase();
+        let text = contentMatch[2]
+          .replace(/<[^>]+>/g, '')  // strip inner HTML tags
+          .replace(/\s+/g, ' ')     // collapse whitespace
+          .trim();
+        
+        if (!text || text.length < 10) continue;
+
+        if (tag === 'h1') markdown += `# ${text}\n\n`;
+        else if (tag === 'h2') markdown += `## ${text}\n\n`;
+        else if (tag === 'h3') markdown += `### ${text}\n\n`;
+        else if (tag === 'h4') markdown += `#### ${text}\n\n`;
+        else if (tag === 'li') markdown += `- ${text}\n`;
+        else markdown += `${text}\n\n`;
+      }
+
+      // Cap at 4000 chars
+      if (markdown.length > 4000) {
+        markdown = markdown.slice(0, 4000) + '\n\n... [truncated]';
+      }
+
+      if (!markdown.trim()) markdown = 'Could not extract readable content from this page.';
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ formatted: markdown, url: targetUrl }));
+    } catch (err) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ formatted: "Fetch failed: " + err.message, url: targetUrl }));
+    }
+    return;
+  }
+
+  // === API: Shell (read-only git commands) ===
+  if (pathname === "/api/shell") {
+    const cmd = url.searchParams.get("cmd") || "";
+    
+    // Only allow safe read-only commands
+    const allowed = ['git diff', 'git log', 'git status', 'git show', 'git branch'];
+    const isSafe = allowed.some(prefix => cmd.startsWith(prefix));
+    
+    if (!isSafe) {
+      res.writeHead(403);
+      res.end(JSON.stringify({ error: "Command not allowed. Only git read commands permitted." }));
+      return;
+    }
+
+    const { exec } = await import("node:child_process");
+    exec(cmd, { cwd: __dirname, timeout: 5000 }, (err, stdout, stderr) => {
+      const output = stdout || stderr || (err ? err.message : 'no output');
+      const formatted = `## Shell: \`${cmd}\`\n\n\`\`\`\n${output.slice(0, 4000)}\n\`\`\``;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: output, formatted: formatted }));
+    });
+    return;
+  }
+
   // === Static file serving ===
   let filePath = join(__dirname, pathname === "/" ? "demo/index.html" : pathname);
 

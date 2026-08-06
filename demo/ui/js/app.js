@@ -14,14 +14,15 @@
     apiFormat: 'openai',
     completionPath: '/v1/chat/completions',
     model: 'gemma-4-26B-A4B-it',
-    thinking: true,
-    systemPrompt: 'You are Luminal — an AI assistant powered by the Luminal Memory engine. Your memory is managed by a sliding window of recent messages plus a recall system that retrieves relevant history from earlier in the conversation. When you see recalled context injected into the prompt, use it directly in your answer. If the information to answer a question is present in the conversation history or recalled nodes, reference it specifically. If something is not in the provided context, say so rather than guessing. Be concise, accurate, and cite which part of the conversation informed your answer when relevant.',
+    thinking: false,
+    systemPrompt: 'You are Liminal, a conversational AI assistant. Chat naturally with the user like a knowledgeable friend. When context from earlier conversation appears in the prompt (labeled Recalled), use that information first. When tool results appear, incorporate them into your answer. Always prioritize information from recalled nodes and tools over your own knowledge. But when no recalled context or tool results are present, just chat — share thoughts, ask questions, discuss ideas, be helpful. Never refuse to answer. Never say you cannot help. If you lack specific information, give your best understanding and say what you are unsure about. Keep responses concise unless the user asks for detail.',
     windowSize: 40,
     maxTokenBudget: 32768,
     reservedTokens: 4096,
     maxRetrievedNodes: 6,
     recallBufferRatio: 0.2,
     retrievalThreshold: 0.2,
+    toolMatchThreshold: 0.5,
     memoryLimitMB: 2048
   };
 
@@ -105,12 +106,51 @@
       Chat.renderMessage(conversation[j].role, conversation[j].content, Math.ceil((j + 1) / 2), false);
     }
 
-    // Check if LLM is reachable
+    // Check if LLM is reachable + detect model capabilities
     try {
       var res = await fetch(CONFIG.endpoint + '/v1/models', { signal: AbortSignal.timeout(2000) });
       llmAvailable = res.ok;
     } catch (e) {
       llmAvailable = false;
+    }
+
+    // Auto-detect thinking support from server props
+    if (llmAvailable) {
+      try {
+        var propsRes = await fetch(CONFIG.endpoint + '/props', { signal: AbortSignal.timeout(2000) });
+        if (propsRes.ok) {
+          var props = await propsRes.json();
+          var template = props.default_generation_settings?.chat_template || props.chat_template || '';
+          
+          // Detect thinking channel
+          if (template.includes('<think>') || template.includes('<|think|>') || (props.thinking === 1)) {
+            CONFIG.thinking = true;
+            CONFIG.thinkOpen = template.includes('<|think|>') ? '<|think|>' : '<think>';
+            CONFIG.thinkClose = template.includes('<|/think|>') ? '<|/think|>' : '</think>';
+            console.log('[Init] Thinking detected: ' + CONFIG.thinkOpen);
+          } else if (template.includes('<|channel>') || template.includes('thought<channel|>')) {
+            CONFIG.thinking = true;
+            CONFIG.thinkOpen = '<|channel>thought<channel|>';
+            CONFIG.thinkClose = '<|channel>response<channel|>';
+            console.log('[Init] Thinking detected (channel format): ' + CONFIG.thinkOpen);
+          } else {
+            CONFIG.thinking = false;
+            console.log('[Init] No thinking support detected in model template');
+          }
+
+          // Detect tool call format
+          if (template.includes('tool_call') || template.includes('<|tool_response>')) {
+            CONFIG.toolCallFormat = 'native';
+            console.log('[Init] Native tool calling detected in template');
+          }
+
+          // Log model info
+          var modelName = props.model || props.default_generation_settings?.model || 'unknown';
+          console.log('[Init] Model: ' + modelName);
+        }
+      } catch (e) {
+        console.log('[Init] Could not fetch /props — using defaults');
+      }
     }
 
     // Init components that need memory ref
@@ -166,33 +206,58 @@
       var pendingNode = memory.chain.append('user', msg);
       memory.bm25.add(pendingNode);
 
-      // Tool discovery: check if any tools match this query
-      var matchedTools = memory.toolRegistry.retrieve(msg);
+      // Tool chain — multi-step deterministic tool execution
       var toolResults = [];
+      var chainMatch = ToolChain.match(msg);
 
-      if (matchedTools.length > 0 && llmAvailable) {
-        // Ask LLM if it should use the tool
-        var toolDecision = await memory._askToolDecision(msg, matchedTools);
+      if (chainMatch) {
+        Topbar.setStatus('active', 'CHAIN: ' + chainMatch.recipe.name.toUpperCase());
+        Chat.renderSystem('\u2692 Running chain: ' + chainMatch.recipe.name);
 
-        if (toolDecision) {
-          Topbar.setStatus('active', 'TOOL: ' + toolDecision.name.toUpperCase());
-          Chat.renderSystem('\u2692 Using tool: ' + toolDecision.name + ' — "' + (toolDecision.params.query || '').slice(0, 60) + '"');
-          console.log('[Tool] Executing: ' + toolDecision.name, toolDecision.params);
+        var chainResult = await ToolChain.execute(chainMatch.recipe, msg);
+        if (chainResult && chainResult.formatted) {
+          toolResults.push({ name: chainMatch.recipe.name, result: { formatted: chainResult.formatted } });
+          Chat.renderSystem('\u2713 Chain complete: ' + chainResult.steps.length + ' steps');
+        }
+      } else {
+        // Single tool — keyword pre-filter then BM25
+        var toolTriggers = ['what time', 'what day', 'whats the date', 'whats the time', 'show me the code', 'read file', 'read the file', 'grep', 'search the code', 'show source', 'open file'];
+        var msgLower = msg.toLowerCase();
+        var hasTrigger = toolTriggers.some(function (t) { return msgLower.includes(t); });
 
-          var toolResult = await memory.toolRegistry.execute(toolDecision.name, toolDecision.params, {
-            query: msg, chain: memory.chain, config: memory.config
-          });
+        if (hasTrigger) {
+          var matchedTools = memory.toolRegistry.retrieve(msg);
+          if (matchedTools.length > 0 && matchedTools[0].score > 0.5) {
+        var topTool = matchedTools[0].tool;
+        var toolParams = { query: msg };
 
-          if (toolResult.success) {
-            toolResults.push({ name: toolDecision.name, result: toolResult.result });
-            // Show results in a tag
-            var resultCount = toolResult.result.results ? toolResult.result.results.length : 0;
-            Chat.renderSystem('\u2713 ' + toolDecision.name + ' returned ' + resultCount + ' results (' + toolResult.elapsed + 'ms)');
-            console.log('[Tool] Success:', toolResult.result);
-          } else {
-            Chat.renderSystem('\u2717 Tool failed: ' + toolResult.error);
-            console.warn('[Tool] Failed:', toolResult.error);
-          }
+        // Infer params by tool type
+        if (topTool.name === 'project_explorer') {
+          toolParams = { action: 'search', target: msg };
+        } else if (topTool.name === 'datetime') {
+          toolParams = { type: 'full' };
+        } else if (topTool.name === 'web_search') {
+          toolParams = { query: msg.replace(/^(can you |please |search for |look up |find |google )/i, '').slice(0, 100) };
+        }
+
+        Topbar.setStatus('active', 'TOOL: ' + topTool.name.toUpperCase());
+        Chat.renderSystem('\u2692 Using tool: ' + topTool.name);
+        console.log('[Tool] Executing: ' + topTool.name, toolParams);
+
+        var toolResult = await memory.toolRegistry.execute(topTool.name, toolParams, {
+          query: msg, chain: memory.chain, config: memory.config
+        });
+
+        if (toolResult.success) {
+          toolResults.push({ name: topTool.name, result: toolResult.result });
+          var resultCount = toolResult.result.results ? toolResult.result.results.length : 0;
+          Chat.renderSystem('\u2713 ' + topTool.name + ' returned ' + resultCount + ' results (' + toolResult.elapsed + 'ms)');
+          console.log('[Tool] Success:', toolResult.result);
+        } else {
+          Chat.renderSystem('\u2717 Tool failed: ' + toolResult.error);
+          console.warn('[Tool] Failed:', toolResult.error);
+        }
+        }
         }
       }
 
@@ -249,6 +314,20 @@
 
       var response;
       if (llmAvailable) {
+        // Fix role alternation: convert system→user (except first), then merge consecutive same-role
+        var fixedMessages = [];
+        messages.forEach(function (m, i) {
+          var role = m.role;
+          if (role === 'system' && i > 0) role = 'user';
+          var last = fixedMessages[fixedMessages.length - 1];
+          if (last && last.role === role) {
+            last.content += '\n\n' + m.content;
+          } else {
+            fixedMessages.push({ role: role, content: m.content });
+          }
+        });
+        messages = fixedMessages;
+
         // Calculate tokens being sent to LLM
         var sentTokens = 0;
         messages.forEach(function (m) {
@@ -260,12 +339,25 @@
 
         // Stream response with live thinking + token display
         var streamMsg = Chat.createStreamingMessage(memory.chain.length + 1);
+        if (!CONFIG.thinking && streamMsg && streamMsg.thinkWrapper) {
+          streamMsg.thinkWrapper.querySelector('div').textContent = 'thinking disabled \u2014 model does not support reasoning or it is turned off';
+          streamMsg.thinkWrapper.style.opacity = '0.35';
+          streamMsg.thinkWrapper.open = false;
+        }
         response = await memory.transport.stream(messages, {
           onThink: function (token) { if (streamMsg) streamMsg.appendThink(token); },
-          onToken: function (token) { if (streamMsg) streamMsg.appendContent(token); },
+          onToken: function (token) {
+            // Strip any channel tags that leak into content
+            var clean = token.replace(/<\|channel>\w+\s*<channel\|>/g, '');
+            if (clean && streamMsg) streamMsg.appendContent(clean);
+          },
           onDone: function (full, think) {
             if (think) console.log('[LLM:think] ' + think.slice(0, 200));
-            if (streamMsg) streamMsg.finalize(full.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim());
+            var cleaned = full
+              .replace(/<\|channel>\w+\s*<channel\|>/g, '')
+              .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
+              .trim();
+            if (streamMsg) streamMsg.finalize(cleaned);
           }
         });
       } else {
@@ -277,7 +369,9 @@
       // Replace pending with turn node
       memory.chain.removeById(pendingNode.id);
       memory.bm25.remove(pendingNode.id);
-      var turnNode = memory.chain.appendTurn(msg, response);
+      // Clean any leaked channel/think tags from stored response
+      var cleanResponse = (response || '').replace(/<\|channel>\w+\s*<channel\|>/g, '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      var turnNode = memory.chain.appendTurn(msg, cleanResponse);
       memory.bm25.add(turnNode);
 
       // Source links for web search      // Append clickable source references only for web search results

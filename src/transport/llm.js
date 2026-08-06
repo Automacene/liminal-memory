@@ -41,7 +41,7 @@ export class LLMTransport {
 
     // Enable thinking/reasoning if configured
     if (this.config.thinking) {
-      body.thinking = true;
+      // body.thinking = true; // handled by chat template
     }
 
     const response = await fetch(url, {
@@ -63,12 +63,9 @@ export class LLMTransport {
       console.log(`[LLM:think] ${reasoning.slice(0, 300)}`);
     }
 
-    // Strip inline thinking tags if present (other model formats)
-    const thinkMatch = content.match(/<\|?think\|?>([\s\S]*?)<\|?\/?think\|?>/);
-    if (thinkMatch) {
-      console.log(`[LLM:think] ${thinkMatch[1].slice(0, 300)}`);
-      content = content.replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>\s*/g, '').trim();
-    }
+    // Strip inline thinking tags if present (various model formats)
+    content = content.replace(/<\|channel>thought<channel\|>[\s\S]*?<\|channel>response<channel\|>/g, '').trim();
+    content = content.replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>/g, '').trim();
 
     return content;
   }
@@ -90,7 +87,7 @@ export class LLMTransport {
     };
 
     if (this.config.thinking) {
-      body.thinking = true;
+      // body.thinking = true; // handled by chat template
     }
 
     const response = await fetch(url, {
@@ -106,9 +103,67 @@ export class LLMTransport {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let fullText = '';
-    let inThink = false;
     let thinkText = '';
     let buffer = '';
+    
+    // Accumulate raw text, then split by boundaries at the end of each chunk
+    let rawAccum = '';
+    let mode = 'pending'; // 'pending' | 'thinking' | 'content'
+
+    // All known boundary markers
+    const THINK_START = ['<think>', '<|think|>', '<|channel>thought<channel|>'];
+    const THINK_END = ['</think>', '<|/think|>', '<|channel>response<channel|>'];
+
+    function findBoundary(text, markers) {
+      for (const m of markers) {
+        const idx = text.indexOf(m);
+        if (idx !== -1) return { idx, marker: m, len: m.length };
+      }
+      return null;
+    }
+
+    function flushAccumulator() {
+      // Process rawAccum: detect boundaries, route sections
+      while (rawAccum.length > 0) {
+        if (mode === 'pending' || mode === 'content') {
+          // Look for think-start
+          const start = findBoundary(rawAccum, THINK_START);
+          if (start) {
+            // Everything before the marker is content
+            const before = rawAccum.slice(0, start.idx);
+            if (before) {
+              fullText += before;
+              if (callbacks.onToken) callbacks.onToken(before);
+            }
+            rawAccum = rawAccum.slice(start.idx + start.len);
+            mode = 'thinking';
+            continue;
+          }
+          // No boundary found — flush all as content
+          fullText += rawAccum;
+          if (callbacks.onToken) callbacks.onToken(rawAccum);
+          rawAccum = '';
+        } else if (mode === 'thinking') {
+          // Look for think-end
+          const end = findBoundary(rawAccum, THINK_END);
+          if (end) {
+            // Everything before the marker is thinking
+            const before = rawAccum.slice(0, end.idx);
+            if (before) {
+              thinkText += before;
+              if (callbacks.onThink) callbacks.onThink(before);
+            }
+            rawAccum = rawAccum.slice(end.idx + end.len);
+            mode = 'content';
+            continue;
+          }
+          // No end found yet — flush all as thinking (more coming)
+          thinkText += rawAccum;
+          if (callbacks.onThink) callbacks.onThink(rawAccum);
+          rawAccum = '';
+        }
+      }
+    }
 
     while (true) {
       const { done, value } = await reader.read();
@@ -129,53 +184,33 @@ export class LLMTransport {
           const token = delta.content || '';
           const reasoningToken = delta.reasoning_content || '';
 
-          // Handle reasoning_content field (Gemma 4 style)
+          // Handle separate reasoning_content field
           if (reasoningToken) {
-            fullText += reasoningToken;
-            inThink = true;
+            mode = 'thinking';
             thinkText += reasoningToken;
             if (callbacks.onThink) callbacks.onThink(reasoningToken);
             continue;
           }
 
-          // If we were in reasoning and now get content, we've switched
-          if (inThink && token) {
-            inThink = false;
+          // If we were getting reasoning_content and now get content, switch
+          if (mode === 'thinking' && !reasoningToken && token) {
+            mode = 'content';
           }
 
           if (!token) continue;
-          fullText += token;
 
-          // Handle inline <think> / </think> tags (other models)
-          if (token.includes('<think>') || token.includes('<|think|>')) {
-            inThink = true;
-            const afterTag = token.replace(/<\|?think\|?>/g, '');
-            if (afterTag && callbacks.onThink) callbacks.onThink(afterTag);
-            thinkText += afterTag;
-            continue;
-          }
-          if (inThink && (token.includes('</think>') || token.includes('<|/think|>'))) {
-            inThink = false;
-            const beforeTag = token.replace(/<\|?\/think\|?>/g, '');
-            if (beforeTag && callbacks.onThink) callbacks.onThink(beforeTag);
-            thinkText += beforeTag;
-            continue;
-          }
-
-          if (inThink) {
-            thinkText += token;
-            if (callbacks.onThink) callbacks.onThink(token);
-          } else {
-            if (callbacks.onToken) callbacks.onToken(token);
-          }
+          // Accumulate and process for inline boundaries
+          rawAccum += token;
+          flushAccumulator();
         } catch { /* skip malformed chunks */ }
       }
     }
 
-    if (callbacks.onDone) callbacks.onDone(fullText, thinkText);
+    // Final flush
+    if (rawAccum.length > 0) flushAccumulator();
 
-    // Return cleaned content (without think tags)
-    return fullText.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim();
+    if (callbacks.onDone) callbacks.onDone(fullText, thinkText);
+    return fullText;
   }
 
   /**
