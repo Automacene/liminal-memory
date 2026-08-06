@@ -12,6 +12,8 @@ const Input = (function () {
     sendBtnEl.addEventListener('click', handleSend);
     textareaEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) {
+        // Skip if pocket mode is active (handled by pocket note system)
+        if (document.querySelector('.input-box--pocket-mode')) return;
         e.preventDefault();
         handleSend();
       }

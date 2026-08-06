@@ -25,10 +25,18 @@ const Topbar = (function () {
     var sideMemory = document.getElementById('side-memory');
     var sideTokens = document.getElementById('side-tokens');
     if (sideNodes) sideNodes.textContent = nodes;
-    if (sideWindow) sideWindow.textContent = windowCount + '/40';
-    if (sideMemory) sideMemory.textContent = memoryMB + ' / 2048 MB';
+    if (sideWindow) sideWindow.textContent = windowCount + '/' + (Topbar._windowSize || 20);
+    if (sideMemory) sideMemory.textContent = memoryMB + ' / ' + (Topbar._memoryLimitMB || 2048) + ' MB';
     if (sideTokens) sideTokens.textContent = totalTokens ? totalTokens.toLocaleString() : '0';
   }
 
-  return { init, setStatus, updateStats };
+  /**
+   * Set config values for display. Call once at init.
+   */
+  function setConfig(config) {
+    Topbar._windowSize = config.windowSize || 20;
+    Topbar._memoryLimitMB = config.memoryLimitMB || 2048;
+  }
+
+  return { init, setStatus, updateStats, setConfig };
 })();

@@ -49,3 +49,30 @@
   padding: 3px;
   border-radius: var(--radius-lg);
 }
+
+
+/* ---- Pocket Note Mode ---- */
+.input-box--pocket-mode {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 2px var(--color-accent-bg), var(--shadow-lg);
+}
+
+.input-box--pocket-mode .input-box__textarea {
+  color: var(--color-accent);
+}
+
+.pocket-mode-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--space-2) var(--space-8);
+  background: var(--color-accent-bg);
+  border-radius: var(--radius-sm);
+  display: none;
+}
+
+.input-box--pocket-mode .pocket-mode-label {
+  display: inline-block;
+}

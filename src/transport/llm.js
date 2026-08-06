@@ -11,7 +11,7 @@ export class LLMTransport {
   /**
    * Send a completion request to the LLM.
    * @param {object[]} messages - array of { role, content } message objects
-   * @returns {string} the assistant's response text
+   * @returns {{ text: string, usage: { promptTokens: number, completionTokens: number, totalTokens: number }|null }}
    */
   async complete(messages) {
     const { apiFormat } = this.config;
@@ -36,12 +36,13 @@ export class LLMTransport {
     const body = {
       model: this.config.model,
       messages,
-      stream: false
+      stream: false,
+      ...this._samplingParams()
     };
 
     // Enable thinking/reasoning if configured
     if (this.config.thinking) {
-      // body.thinking = true; // handled by chat template
+      body.thinking = true;
     }
 
     const response = await fetch(url, {
@@ -67,34 +68,45 @@ export class LLMTransport {
     content = content.replace(/<\|channel>thought<channel\|>[\s\S]*?<\|channel>response<channel\|>/g, '').trim();
     content = content.replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>/g, '').trim();
 
-    return content;
+    // Extract usage from response
+    const usage = data.usage ? {
+      promptTokens: data.usage.prompt_tokens || 0,
+      completionTokens: data.usage.completion_tokens || 0,
+      totalTokens: data.usage.total_tokens || 0
+    } : null;
+
+    return { text: content, usage };
   }
 
   /**
    * OpenAI-compatible streaming completion.
    * Calls onThink(token) during <think> blocks, onToken(token) for the response.
-   * Returns the full response text when done.
+   * Returns the full response text and usage stats when done.
    * @param {object[]} messages
    * @param {object} callbacks - { onToken, onThink, onDone }
-   * @returns {string} full response
+   * @returns {{ text: string, usage: { promptTokens: number, completionTokens: number, totalTokens: number }|null }}
    */
-  async _openaiStream(messages, callbacks = {}) {
+  async _openaiStream(messages, callbacks = {}, signal = null) {
     const url = `${this.config.endpoint}${this.config.completionPath}`;
     const body = {
       model: this.config.model,
       messages,
-      stream: true
+      stream: true,
+      ...this._samplingParams()
     };
 
     if (this.config.thinking) {
-      // body.thinking = true; // handled by chat template
+      body.thinking = true;
     }
 
-    const response = await fetch(url, {
+    const fetchOpts = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
-    });
+    };
+    if (signal) fetchOpts.signal = signal;
+
+    const response = await fetch(url, fetchOpts);
 
     if (!response.ok) {
       throw new Error(`LLM stream failed: ${response.status} ${response.statusText}`);
@@ -105,6 +117,7 @@ export class LLMTransport {
     let fullText = '';
     let thinkText = '';
     let buffer = '';
+    let usage = null;
     
     // Accumulate raw text, then split by boundaries at the end of each chunk
     let rawAccum = '';
@@ -184,6 +197,15 @@ export class LLMTransport {
           const token = delta.content || '';
           const reasoningToken = delta.reasoning_content || '';
 
+          // Capture usage from final chunk (llama.cpp, vLLM, OpenAI all send this)
+          if (parsed.usage) {
+            usage = {
+              promptTokens: parsed.usage.prompt_tokens || 0,
+              completionTokens: parsed.usage.completion_tokens || 0,
+              totalTokens: parsed.usage.total_tokens || 0
+            };
+          }
+
           // Handle separate reasoning_content field
           if (reasoningToken) {
             mode = 'thinking';
@@ -210,19 +232,22 @@ export class LLMTransport {
     if (rawAccum.length > 0) flushAccumulator();
 
     if (callbacks.onDone) callbacks.onDone(fullText, thinkText);
-    return fullText;
+    return { text: fullText, usage };
   }
 
   /**
    * Stream a completion with callbacks. Falls back to non-streaming if callbacks not provided.
    * @param {object[]} messages
    * @param {object} [callbacks] - { onToken, onThink, onDone }
-   * @returns {string}
+   * @returns {{ text: string, usage: { promptTokens: number, completionTokens: number, totalTokens: number }|null }}
    */
-  async stream(messages, callbacks) {
+  async stream(messages, callbacks, signal) {
     const { apiFormat } = this.config;
     if (apiFormat === "openai" || !apiFormat) {
-      return this._openaiStream(messages, callbacks);
+      return this._openaiStream(messages, callbacks, signal);
+    }
+    if (apiFormat === "ollama") {
+      return this._ollamaStream(messages, callbacks, signal);
     }
     // Fallback: non-streaming
     return this.complete(messages);
@@ -236,8 +261,13 @@ export class LLMTransport {
     const body = {
       model: this.config.model,
       messages,
-      stream: false
+      stream: false,
+      options: this._samplingParamsOllama()
     };
+
+    if (this.config.thinking) {
+      body.think = true;
+    }
 
     const response = await fetch(url, {
       method: "POST",
@@ -250,7 +280,98 @@ export class LLMTransport {
     }
 
     const data = await response.json();
-    return data.message?.content || "";
+    const text = data.message?.content || "";
+
+    // Ollama uses prompt_eval_count / eval_count
+    const usage = (data.prompt_eval_count != null || data.eval_count != null) ? {
+      promptTokens: data.prompt_eval_count || 0,
+      completionTokens: data.eval_count || 0,
+      totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0)
+    } : null;
+
+    return { text, usage };
+  }
+
+  /**
+   * Ollama streaming completion (NDJSON format).
+   * The final object with done:true contains prompt_eval_count and eval_count.
+   * @param {object[]} messages
+   * @param {object} callbacks - { onToken, onThink, onDone }
+   * @returns {{ text: string, usage: { promptTokens: number, completionTokens: number, totalTokens: number }|null }}
+   */
+  async _ollamaStream(messages, callbacks = {}, signal = null) {
+    const url = `${this.config.endpoint}/api/chat`;
+    const body = {
+      model: this.config.model,
+      messages,
+      stream: true,
+      options: this._samplingParamsOllama()
+    };
+
+    if (this.config.thinking) {
+      body.think = true;
+    }
+
+    const fetchOpts = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    };
+    if (signal) fetchOpts.signal = signal;
+
+    const response = await fetch(url, fetchOpts);
+
+    if (!response.ok) {
+      throw new Error(`Ollama stream failed: ${response.status} ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+    let usage = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+
+          // Final message with done:true contains usage stats
+          if (parsed.done) {
+            usage = {
+              promptTokens: parsed.prompt_eval_count || 0,
+              completionTokens: parsed.eval_count || 0,
+              totalTokens: (parsed.prompt_eval_count || 0) + (parsed.eval_count || 0)
+            };
+            break;
+          }
+
+          // Handle thinking content (Ollama returns message.thinking when think:true)
+          const thinking = parsed.message?.thinking || '';
+          if (thinking) {
+            if (callbacks.onThink) callbacks.onThink(thinking);
+            continue;
+          }
+
+          const token = parsed.message?.content || '';
+          if (token) {
+            fullText += token;
+            if (callbacks.onToken) callbacks.onToken(token);
+          }
+        } catch { /* skip malformed lines */ }
+      }
+    }
+
+    if (callbacks.onDone) callbacks.onDone(fullText, '');
+    return { text: fullText, usage };
   }
 
   /**
@@ -270,7 +391,8 @@ export class LLMTransport {
     }
 
     const data = await response.json();
-    return this.config.parseResponse(data);
+    const text = this.config.parseResponse(data);
+    return { text, usage: null };
   }
 
   /**
@@ -301,7 +423,7 @@ Be concise. Max 2 sentences per field. Max 5 items per array.`
       }
     ];
 
-    const response = await this.complete(messages);
+    const { text: response } = await this.complete(messages);
 
     try {
       return JSON.parse(response);
@@ -313,5 +435,42 @@ Be concise. Max 2 sentences per field. Max 5 items per array.`
         openThreads: []
       };
     }
+  }
+
+  /**
+   * Build sampling params for OpenAI-compatible APIs (llama.cpp, vLLM, LM Studio).
+   * Only includes params that are explicitly set (not undefined).
+   * @returns {object}
+   */
+  _samplingParams() {
+    const params = {};
+    const c = this.config;
+    if (c.temperature !== undefined) params.temperature = c.temperature;
+    if (c.top_p !== undefined) params.top_p = c.top_p;
+    if (c.top_k !== undefined) params.top_k = c.top_k;
+    if (c.min_p !== undefined) params.min_p = c.min_p;
+    if (c.repeat_penalty !== undefined) params.repeat_penalty = c.repeat_penalty;
+    if (c.presence_penalty !== undefined) params.presence_penalty = c.presence_penalty;
+    if (c.frequency_penalty !== undefined) params.frequency_penalty = c.frequency_penalty;
+    if (c.max_tokens !== undefined) params.max_tokens = c.max_tokens;
+    if (c.seed !== undefined && c.seed !== -1) params.seed = c.seed;
+    return params;
+  }
+
+  /**
+   * Build sampling params for Ollama's options format.
+   * @returns {object}
+   */
+  _samplingParamsOllama() {
+    const opts = {};
+    const c = this.config;
+    if (c.temperature !== undefined) opts.temperature = c.temperature;
+    if (c.top_p !== undefined) opts.top_p = c.top_p;
+    if (c.top_k !== undefined) opts.top_k = c.top_k;
+    if (c.min_p !== undefined) opts.min_p = c.min_p;
+    if (c.repeat_penalty !== undefined) opts.repeat_penalty = c.repeat_penalty;
+    if (c.max_tokens !== undefined) opts.num_predict = c.max_tokens;
+    if (c.seed !== undefined && c.seed !== -1) opts.seed = c.seed;
+    return opts;
   }
 }

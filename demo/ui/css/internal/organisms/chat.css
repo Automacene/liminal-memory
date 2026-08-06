@@ -296,3 +296,156 @@
   border: 1px solid var(--color-accent-border);
   margin-top: var(--space-10);
 }
+
+
+/* ---- Pocket Note Button & Input ---- */
+.pocket-note-btn {
+  position: absolute;
+  top: var(--space-8);
+  right: var(--space-8);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.message:hover .pocket-note-btn {
+  opacity: 1;
+}
+
+.pocket-note-btn:hover {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+
+.pocket-note-input {
+  display: flex;
+  gap: var(--space-6);
+  margin-top: var(--space-8);
+  padding: var(--space-6) var(--space-8);
+  background: rgba(245, 245, 245, 0.8);
+  border: 1px dashed var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.pocket-note-input input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-4);
+  border: none;
+  background: transparent;
+  outline: none;
+}
+
+.pocket-note-input button {
+  padding: var(--space-4) var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pocket-note-display {
+  margin-top: var(--space-6);
+  padding: var(--space-4) var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+
+/* ---- Pocket Note Panel (between halted response and regeneration) ---- */
+.pocket-note-panel {
+  width: 85%;
+  justify-self: center;
+  padding: var(--space-10) var(--space-12);
+  background: var(--color-accent-bg);
+  border: 1px dashed var(--color-accent-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  animation: fadeSlideIn var(--transition-slow) ease both;
+}
+
+.pocket-note-panel__label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
+  margin-bottom: var(--space-4);
+}
+
+/* Halted response gets a visual indicator */
+.message--halted .message__body {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.message--halted .message__body::after {
+  content: '— halted by pocket note';
+  display: block;
+  margin-top: var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+
+/* ---- Pocket Staging Area (pinned to bottom of chat) ---- */
+.pocket-staging {
+  padding: var(--space-8) var(--space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
+  background: var(--color-bg);
+}
+
+.pocket-staging:empty {
+  display: none;
+  border: none;
+  padding: 0;
+}
+
+.pocket-staging__note {
+  padding: var(--space-8) var(--space-12);
+  background: var(--color-accent-bg);
+  border: 1px dashed var(--color-accent-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  opacity: 0.8;
+  animation: fadeSlideIn var(--transition-slow) ease both;
+}
+
+.pocket-staging__label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+  margin-bottom: var(--space-2);
+}
