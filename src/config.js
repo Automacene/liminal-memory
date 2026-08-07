@@ -76,6 +76,9 @@ export const defaultConfig = {
   // BM25 match score required before a tool is considered for a query.
   toolMatchThreshold: 0.3,
 
+  // Kill switch for web search. Set to false to disable all web search attempts.
+  webSearchEnabled: false,
+
 
   // ===== SEARCH TUNING =====
 

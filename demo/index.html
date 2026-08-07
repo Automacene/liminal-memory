@@ -180,6 +180,7 @@
         <button class="btn-action" id="btn-search" title="Search conversation history">⌕ Search</button>
         <button class="btn-action" id="btn-inspect" title="Inspect memory state">◉ Inspect</button>
         <button class="btn-action" id="btn-status" title="System status">⊡ Status</button>
+        <button class="btn-action" id="btn-ingest" title="Ingest documents or repos">⬆ Ingest</button>
       </div>
 
       <!-- Chat Area -->
@@ -286,9 +287,48 @@
     </div>
   </div>
 
+  <!-- Ingest Modal -->
+  <div class="modal-backdrop" id="modal-ingest-backdrop"></div>
+  <div class="modal modal--wide" id="modal-ingest">
+    <div class="modal__header">
+      <span class="modal__title">⬆ Ingest Documents</span>
+      <button class="btn-icon btn-icon--ghost" id="modal-ingest-close">✕</button>
+    </div>
+    <div class="modal__body" style="padding:20px;">
+      <!-- Tabs -->
+      <div style="display:flex;gap:12px;margin-bottom:16px;">
+        <button class="btn-action active" id="ingest-tab-file" style="flex:1;">📄 Upload File</button>
+        <button class="btn-action" id="ingest-tab-repo" style="flex:1;">📦 Git Repo</button>
+      </div>
+
+      <!-- File Upload Panel -->
+      <div id="ingest-panel-file">
+        <div style="border:2px dashed #333;border-radius:8px;padding:30px;text-align:center;margin-bottom:12px;cursor:pointer;" id="ingest-dropzone">
+          <div style="font-size:1.1rem;color:#aaa;margin-bottom:8px;">Drop a file here or click to browse</div>
+          <div style="font-size:0.8rem;color:#666;">Supports: .md, .txt, .pdf, .js, .ts, .py, .rs, .go, .json, .yaml</div>
+          <input type="file" id="ingest-file-input" style="display:none;" accept=".md,.txt,.pdf,.js,.ts,.jsx,.tsx,.py,.rs,.go,.java,.c,.cpp,.h,.rb,.php,.json,.yaml,.yml,.toml,.css,.html">
+        </div>
+        <div id="ingest-file-status" style="font-size:0.85rem;color:#888;min-height:20px;"></div>
+      </div>
+
+      <!-- Git Repo Panel -->
+      <div id="ingest-panel-repo" style="display:none;">
+        <input type="text" id="ingest-repo-url" placeholder="https://github.com/user/repo.git" style="width:100%;padding:10px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#eee;font-size:0.95rem;margin-bottom:12px;">
+        <div style="font-size:0.8rem;color:#666;margin-bottom:12px;">Public repos only. Clones shallow (--depth 1). Auto-ignores: node_modules, .git, dist, build, vendor, lock files.</div>
+        <div id="ingest-repo-status" style="font-size:0.85rem;color:#888;min-height:20px;"></div>
+      </div>
+
+      <!-- Action -->
+      <button class="btn-control" id="ingest-run-btn" style="width:100%;margin-top:12px;padding:12px;font-size:1rem;">▶ Ingest</button>
+      <div id="ingest-result" style="margin-top:12px;font-size:0.9rem;color:#7fdbca;min-height:20px;"></div>
+    </div>
+  </div>
+
   <!-- ============================================================
        SCRIPTS — Load order: library → canvas → components → app
   ============================================================ -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/lib/marked.umd.min.js"></script>
   <script src="ui/js/internal/vendor/gifuct.js"></script>
   <script src="../dist/luminal-memory.umd.js"></script>
@@ -310,7 +350,10 @@
   <script src="ui/js/internal/components/settings-modal.js"></script>
   <script src="ui/js/internal/components/selection-mode.js"></script>
   <script src="ui/js/internal/components/recall-fx.js"></script>
+  <script src="ui/js/internal/components/ingest-modal.js"></script>
   <script src="ui/js/internal/tools/toolchain.js"></script>
+  <script src="ui/js/internal/mock-responses.js"></script>
+  <script src="ui/js/internal/sovereign-loop.js"></script>
   <script src="ui/js/internal/app.js"></script>
 </body>
 </html>

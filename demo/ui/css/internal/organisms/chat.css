@@ -180,6 +180,30 @@
   border-color: var(--color-border-light);
 }
 
+/* Ephemeral Mind messages — distinct inner-reasoning style */
+.message--ephemeral {
+  justify-self: end;
+  width: 75%;
+  opacity: 0.85;
+}
+
+.message--ephemeral .message__body {
+  border-color: var(--color-border);
+  border-style: dashed;
+  background: rgba(245, 245, 250, 0.5);
+  backdrop-filter: var(--blur-md);
+}
+
+.message--ephemeral .message__sender {
+  color: var(--color-text-secondary);
+}
+
+.wire-pill--ephemeral {
+  color: var(--color-text-secondary);
+  background: rgba(120, 120, 140, 0.08);
+  border-color: var(--color-border);
+}
+
 /* System messages — compact, muted */
 .message--system .message__body {
   background: rgba(245, 245, 245, 0.6);
@@ -236,6 +260,45 @@
   animation: fadeSlideIn var(--transition-slow) ease both;
 }
 
+/* ---- Ephemeral Mind Processing Indicator ---- */
+.ephemeral-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-10) var(--space-16);
+  background: rgba(120, 120, 140, 0.06);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  width: fit-content;
+  justify-self: end;
+  animation: fadeSlideIn var(--transition-slow) ease both;
+}
+
+.ephemeral-indicator__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-secondary);
+  animation: ephemeralPulse 1.2s ease-in-out infinite;
+}
+
+.ephemeral-indicator__text {
+  animation: ephemeralTextPulse 2s ease-in-out infinite;
+}
+
+@keyframes ephemeralPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+@keyframes ephemeralTextPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
 /* ---- Window Boundary Divider ---- */
 .window-boundary {
   grid-column: full;
@@ -262,6 +325,17 @@
   white-space: nowrap;
   opacity: 0.7;
   flex-shrink: 0;
+}
+
+/* ---- Math (KaTeX) blocks ---- */
+.message__content.markdown .math-block {
+  margin: var(--space-12) 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.message__content.markdown .katex-display {
+  margin: var(--space-10) 0;
 }
 
 /* ---- Wireframe Pill Tags (inside card headers) ---- */

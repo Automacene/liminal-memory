@@ -5,7 +5,8 @@
  * determines it's relevant to the current query. Tools are stored as
  * special nodes and discovered through BM25 matching against their descriptions.
  * 
- * The AI doesn't know about tools until retrieval surfaces them.
+ * Tools with discovery:'llm' are always available in the LLM's tool schema
+ * and invoked directly by the model (not discovered via BM25).
  */
 export class Tool {
   /**
@@ -14,8 +15,11 @@ export class Tool {
    * @param {string} config.description - natural language description for BM25 matching
    * @param {object} config.parameters - JSON schema of accepted parameters
    * @param {function} config.execute - async function(params, context) → result
+   * @param {'bm25'|'llm'} [config.discovery='bm25'] - how this tool is surfaced:
+   *   'bm25' = discovered by search relevance (system decides)
+   *   'llm' = always presented to the LLM, model decides when to call
    */
-  constructor({ name, description, parameters = {}, execute }) {
+  constructor({ name, description, parameters = {}, execute, discovery = 'bm25' }) {
     if (!name) throw new Error("[Tool] name is required");
     if (!description) throw new Error("[Tool] description is required");
     if (!execute || typeof execute !== "function") throw new Error("[Tool] execute must be a function");
@@ -24,9 +28,10 @@ export class Tool {
     this.description = description;
     this.parameters = parameters;
     this.execute = execute;
+    this.discovery = discovery;
     this._registered = false;
 
-    console.log(`[Tool:${this.name}] Created — "${this.description.slice(0, 60)}..."`);
+    console.log(`[Tool:${this.name}] Created (discovery: ${this.discovery}) — "${this.description.slice(0, 60)}..."`);
   }
 
   /**

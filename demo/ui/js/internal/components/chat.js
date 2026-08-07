@@ -4,8 +4,69 @@
 const Chat = (function () {
   let streamEl;
 
+  /**
+   * Auto-scroll only if user is already at (or near) the bottom.
+   * If they've scrolled up to read, leave them alone.
+   */
+  function autoScroll() {
+    if (!streamEl) return;
+    var threshold = 80;
+    var atBottom = (streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight) < threshold;
+    if (atBottom) {
+      streamEl.scrollTop = streamEl.scrollHeight;
+    }
+  }
+
   function init() {
     streamEl = document.getElementById('chat-stream');
+
+    // === KaTeX + marked integration ===
+    // Registers a marked extension that renders LaTeX math blocks.
+    // $$...$$ → display math, $...$ → inline math.
+    if (typeof marked !== 'undefined' && typeof katex !== 'undefined') {
+      var mathExtension = {
+        extensions: [
+          {
+            name: 'mathBlock',
+            level: 'block',
+            start: function (src) { var m = src.match(/\$\$/); return m ? m.index : -1; },
+            tokenizer: function (src) {
+              var match = src.match(/^\$\$([\s\S]+?)\$\$/);
+              if (match) {
+                return { type: 'mathBlock', raw: match[0], text: match[1].trim() };
+              }
+            },
+            renderer: function (token) {
+              try {
+                return '<div class="math-block">' + katex.renderToString(token.text, { displayMode: true, throwOnError: false }) + '</div>';
+              } catch (e) {
+                return '<div class="math-block"><code>' + token.text + '</code></div>';
+              }
+            }
+          },
+          {
+            name: 'mathInline',
+            level: 'inline',
+            start: function (src) { var m = src.match(/\$/); return m ? m.index : -1; },
+            tokenizer: function (src) {
+              var match = src.match(/^\$([^\$\n]+?)\$/);
+              if (match) {
+                return { type: 'mathInline', raw: match[0], text: match[1].trim() };
+              }
+            },
+            renderer: function (token) {
+              try {
+                return katex.renderToString(token.text, { displayMode: false, throwOnError: false });
+              } catch (e) {
+                return '<code>' + token.text + '</code>';
+              }
+            }
+          }
+        ]
+      };
+      marked.marked.use(mathExtension);
+      console.log('[Chat] KaTeX math rendering enabled');
+    }
   }
 
   function renderMessage(role, content, nodeId, animate) {
@@ -20,7 +81,8 @@ const Chat = (function () {
     const sender = document.createElement('div');
     sender.className = 'message__sender';
     if (role === 'user') sender.textContent = 'YOU';
-    else if (role === 'assistant') sender.textContent = '◈ LUMINAL';
+    else if (role === 'assistant') sender.textContent = '◈ SOVEREIGN MIND';
+    else if (role === 'ephemeral') sender.textContent = '◇ EPHEMERAL MIND';
     else sender.textContent = 'SYSTEM';
 
     // Body card
@@ -33,10 +95,22 @@ const Chat = (function () {
       header.className = 'message__header';
       const pill1 = document.createElement('span');
       pill1.className = 'wire-pill wire-pill--accent';
-      pill1.textContent = '[ RESPONSE ]';
+      pill1.textContent = '[ SOVEREIGN ]';
       const pill2 = document.createElement('span');
       pill2.className = 'wire-pill';
       pill2.textContent = 'NODE ' + (nodeId || '?');
+      header.appendChild(pill1);
+      header.appendChild(pill2);
+      body.appendChild(header);
+    } else if (role === 'ephemeral') {
+      const header = document.createElement('div');
+      header.className = 'message__header';
+      const pill1 = document.createElement('span');
+      pill1.className = 'wire-pill wire-pill--ephemeral';
+      pill1.textContent = '[ EPHEMERAL ]';
+      const pill2 = document.createElement('span');
+      pill2.className = 'wire-pill';
+      pill2.textContent = 'INNER REASONING';
       header.appendChild(pill1);
       header.appendChild(pill2);
       body.appendChild(header);
@@ -52,7 +126,7 @@ const Chat = (function () {
 
     // Content
     const contentEl = document.createElement('div');
-    if (role === 'assistant' && typeof marked !== 'undefined') {
+    if ((role === 'assistant' || role === 'ephemeral') && typeof marked !== 'undefined') {
       contentEl.className = 'message__content markdown';
       contentEl.innerHTML = marked.marked(content);
     } else {
@@ -64,19 +138,36 @@ const Chat = (function () {
     wrapper.appendChild(sender);
     wrapper.appendChild(body);
     streamEl.appendChild(wrapper);
-    streamEl.scrollTop = streamEl.scrollHeight;
+    autoScroll();
   }
 
-  function renderSystem(content) {
+  function renderSystem(content, opts) {
     if (!streamEl) return;
+    opts = opts || {};
     const wrapper = document.createElement('div');
     wrapper.className = 'message message--system';
     const body = document.createElement('div');
     body.className = 'message__body';
-    body.textContent = content;
+
+    // Render markdown if content looks like it has formatting
+    if (typeof marked !== 'undefined' && (content.includes('**') || content.includes('$$') || content.includes('`') || content.includes('# '))) {
+      body.className = 'message__body markdown';
+      body.innerHTML = marked.marked(content);
+    } else {
+      body.textContent = content;
+    }
+
+    // Show truncation indicator if content was cut
+    if (opts.truncated) {
+      const indicator = document.createElement('div');
+      indicator.style.cssText = 'font-family:var(--font-mono);font-size:9px;color:var(--color-accent);margin-top:6px;';
+      indicator.textContent = '\u2026 truncated — full content in memory (Node ' + (opts.nodeId || '?') + ')';
+      body.appendChild(indicator);
+    }
+
     wrapper.appendChild(body);
     streamEl.appendChild(wrapper);
-    streamEl.scrollTop = streamEl.scrollHeight;
+    autoScroll();
   }
 
   function renderRecall(count) {
@@ -85,7 +176,7 @@ const Chat = (function () {
     el.className = 'recall-indicator';
     el.textContent = '\u27E1 ' + count + ' node' + (count > 1 ? 's' : '') + ' recalled from history';
     streamEl.appendChild(el);
-    streamEl.scrollTop = streamEl.scrollHeight;
+    autoScroll();
   }
 
   /**
@@ -101,7 +192,7 @@ const Chat = (function () {
 
     const sender = document.createElement('div');
     sender.className = 'message__sender';
-    sender.textContent = '\u25C8 LUMINAL';
+    sender.textContent = '\u25C8 SOVEREIGN MIND';
 
     const body = document.createElement('div');
     body.className = 'message__body';
@@ -111,7 +202,7 @@ const Chat = (function () {
     header.className = 'message__header';
     const pill1 = document.createElement('span');
     pill1.className = 'wire-pill wire-pill--accent';
-    pill1.textContent = '[ RESPONSE ]';
+    pill1.textContent = '[ SOVEREIGN ]';
     const pill2 = document.createElement('span');
     pill2.className = 'wire-pill';
     pill2.textContent = 'NODE ' + (nodeId || '?');
@@ -157,7 +248,7 @@ const Chat = (function () {
     wrapper.appendChild(sender);
     wrapper.appendChild(body);
     streamEl.appendChild(wrapper);
-    streamEl.scrollTop = streamEl.scrollHeight;
+    autoScroll();
 
     return {
       thinkEl: thinkContent,
@@ -168,8 +259,7 @@ const Chat = (function () {
         if (thinkContent.textContent === 'waiting for reasoning...') thinkContent.textContent = '';
         thinkWrapper.style.opacity = '0.7';
         thinkContent.textContent += token;
-        streamEl.scrollTop = streamEl.scrollHeight;
-        console.log('[Stream:think]', token.slice(0, 50));
+        autoScroll();
       },
       appendContent: function (token) {
         // Accumulate raw text, re-render as markdown periodically
@@ -179,7 +269,7 @@ const Chat = (function () {
         } else {
           contentEl.textContent = contentEl._raw;
         }
-        streamEl.scrollTop = streamEl.scrollHeight;
+        autoScroll();
       },
       finalize: function (fullText) {
         if (typeof marked !== 'undefined') {
@@ -302,8 +392,78 @@ const Chat = (function () {
     body.innerHTML = html;
     el.appendChild(body);
     streamEl.appendChild(el);
-    streamEl.scrollTop = streamEl.scrollHeight;
+    autoScroll();
   }
 
-  return { init, renderMessage, renderSystem, renderRecall, createStreamingMessage, renderSources, renderWindowBoundary, removeArchived, clear };
+  /**
+   * Render an Ephemeral Mind response in the chat stream.
+   * @param {string} content - the ephemeral mind's output
+   */
+  function renderEphemeral(content) {
+    renderMessage('ephemeral', content, null, true);
+  }
+
+  /**
+   * Create a streaming message for the Ephemeral Mind (live token updates).
+   * No thinking block — ephemeral doesn't reason with tags.
+   */
+  function createEphemeralStreamingMessage() {
+    if (!streamEl) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'message message--ephemeral';
+
+    const sender = document.createElement('div');
+    sender.className = 'message__sender';
+    sender.textContent = '\u25C7 EPHEMERAL MIND';
+
+    const body = document.createElement('div');
+    body.className = 'message__body';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'message__header';
+    const pill1 = document.createElement('span');
+    pill1.className = 'wire-pill wire-pill--ephemeral';
+    pill1.textContent = '[ EPHEMERAL ]';
+    const pill2 = document.createElement('span');
+    pill2.className = 'wire-pill';
+    pill2.textContent = 'INNER REASONING';
+    header.appendChild(pill1);
+    header.appendChild(pill2);
+    body.appendChild(header);
+
+    // Content area
+    const contentEl = document.createElement('div');
+    contentEl.className = 'message__content markdown';
+    body.appendChild(contentEl);
+
+    wrapper.appendChild(sender);
+    wrapper.appendChild(body);
+    streamEl.appendChild(wrapper);
+    autoScroll();
+
+    return {
+      contentEl: contentEl,
+      body: body,
+      appendContent: function (token) {
+        contentEl._raw = (contentEl._raw || '') + token;
+        if (typeof marked !== 'undefined') {
+          contentEl.innerHTML = marked.marked(contentEl._raw);
+        } else {
+          contentEl.textContent = contentEl._raw;
+        }
+        autoScroll();
+      },
+      finalize: function (fullText) {
+        if (typeof marked !== 'undefined') {
+          contentEl.innerHTML = marked.marked(fullText);
+        } else {
+          contentEl.textContent = fullText;
+        }
+      }
+    };
+  }
+
+  return { init, renderMessage, renderEphemeral, createEphemeralStreamingMessage, renderSystem, renderRecall, createStreamingMessage, renderSources, renderWindowBoundary, removeArchived, clear };
 })();

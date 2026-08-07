@@ -1,105 +1,146 @@
 /**
- * Web Search Tool — uses Firecrawl's keyless search endpoint.
- * No API key required (rate-limited free tier).
- * 
- * Searches the web, scrapes top results for full content,
- * and returns comprehensive excerpts for the LLM to synthesize.
+ * Web Search Tool — fetches relevant web content and stores as research nodes.
+ *
+ * Flow:
+ * 1. Search Google via serve.js /api/websearch endpoint (Playwright headless Chrome)
+ * 2. Score snippets against query (BM25-style relevance check)
+ * 3. Fetch full page content for relevant results (respectful: delays, robots.txt, honest UA)
+ * 4. Clean HTML → Markdown via cheerio + turndown (server-side)
+ * 5. Return structured content for prompt injection + node storage
+ *
+ * The tool uses the serve.js API endpoints — all heavy lifting (Playwright, cheerio, turndown)
+ * happens server-side. The browser-side tool just coordinates.
  */
 import { Tool } from "../tools/base.js";
 
 /**
- * Create a web search tool instance.
+ * Create the web search tool.
  * @param {object} [config]
- * @param {string} [config.endpoint] - Firecrawl API endpoint (default: hosted)
- * @param {number} [config.searchLimit] - how many results to fetch (default: 6)
- * @param {number} [config.excerptLength] - chars per result to keep (default: 2000)
+ * @param {string} [config.apiBase] - base URL for the serve.js API (default: '')
+ * @param {number} [config.maxResults] - max pages to crawl (default: 3)
  * @returns {Tool}
  */
 export function createWebSearchTool(config = {}) {
-  const endpoint = config.endpoint || "https://api.firecrawl.dev/v2/search";
-  const searchLimit = config.searchLimit || 6;
-  const excerptLength = config.excerptLength || 2000;
+  const apiBase = config.apiBase || '';
+  const maxResults = config.maxResults || 3;
+  const memoryConfig = config.memoryConfig || null;
 
   return new Tool({
     name: "web_search",
-    description: "Search the internet when the user says to search, look up, google, or find something online. Trigger phrases: search for, look up, google this, find online, check the web, what does the internet say, search online for. Only use when explicitly asked to search the web.",
+    discovery: "bm25",
+    description: "Search the web for current information, documentation, tutorials, code examples, or answers to technical questions. Use when the conversation requires up-to-date facts, external references, or information not available in memory.",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "A short, specific search query using keywords. Write it like you would type into Google. No full sentences. Example: 'gemma 4 release date 2024' not 'what is the latest gemma model'"
+          description: "A short Google search query, 3-6 words, like a human would type into a search bar. No full sentences. No questions. Just keywords."
         }
       },
       required: ["query"]
     },
     execute: async function (params) {
       const query = params.query;
-      if (!query) throw new Error("query parameter is required");
+      if (!query) throw new Error("web_search requires a query");
 
-      console.log(`[WebSearch] Searching: "${query}" (limit: ${searchLimit})`);
+      // Kill switch — check config flag
+      if (memoryConfig && memoryConfig.webSearchEnabled === false) {
+        console.log('[WebSearch] Disabled (webSearchEnabled: false)');
+        return { result: { results: [], query }, formatted: "Web search is currently disabled." };
+      }
+      // Show searching modal so user knows not to interact
+      const overlay = document.createElement('div');
+      overlay.id = 'web-search-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:9999;';
+      overlay.innerHTML = '<div style="background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:40px 60px;text-align:center;font-family:inherit;"><div style="font-size:1.4rem;color:#e0e0e0;margin-bottom:12px;">🔍 AI is searching the web</div><div style="font-size:0.95rem;color:#888;margin-bottom:8px;">Do not make adjustments</div><div style="font-size:0.85rem;color:#555;font-style:italic;">"' + query + '"</div></div>';
+      document.body.appendChild(overlay);
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: query,
-          limit: searchLimit,
-          scrapeOptions: {
-            formats: ["markdown"]
+      try {
+        // Step 1: Search via Playwright (visible Chrome window)
+        const searchRes = await fetch(`${apiBase}/api/websearch?q=${encodeURIComponent(query)}`);
+        if (!searchRes.ok) throw new Error("Search failed: " + searchRes.status);
+        const searchData = await searchRes.json();
+
+        if (!searchData.results || searchData.results.length === 0) {
+          return {
+            result: { results: [], query },
+            formatted: "No web results found for: " + query
+          };
+        }
+
+        // Step 2: Score snippets for relevance (simple keyword overlap)
+        const queryTerms = query.toLowerCase().split(/\W+/).filter(w => w.length >= 3);
+        const scored = searchData.results.map(r => {
+          const text = ((r.title || '') + ' ' + (r.snippet || '')).toLowerCase();
+          const hits = queryTerms.filter(t => text.includes(t));
+          return { ...r, relevance: hits.length / queryTerms.length };
+        }).filter(r => r.relevance > 0.3)
+          .sort((a, b) => b.relevance - a.relevance)
+          .slice(0, maxResults);
+
+        if (scored.length === 0) {
+          return {
+            result: { results: searchData.results.slice(0, 3), query },
+            formatted: searchData.formatted || "Results found but low relevance."
+          };
+        }
+
+        // Step 3: Fetch full content for top relevant results (via serve.js)
+        const fetchedPages = [];
+        for (const result of scored) {
+          try {
+            const fetchRes = await fetch(`${apiBase}/api/fetch?url=${encodeURIComponent(result.url)}`);
+            if (fetchRes.ok) {
+              const pageData = await fetchRes.json();
+              if (pageData.formatted && pageData.formatted.length > 50) {
+                fetchedPages.push({
+                  title: result.title,
+                  url: result.url,
+                  content: pageData.formatted
+                });
+              }
+            }
+          } catch (e) {
+            console.log('[WebSearch] Fetch failed for ' + result.url + ': ' + e.message);
           }
-        })
-      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[WebSearch] HTTP ${response.status}: ${errorText.slice(0, 200)}`);
-        throw new Error(`Search failed: HTTP ${response.status}`);
-      }
+          // Respectful delay between fetches (3-5 seconds)
+          if (scored.indexOf(result) < scored.length - 1) {
+            await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+          }
+        }
 
-      const data = await response.json();
+        // Step 4: Format results for prompt injection
+        let formatted = '';
+        const resultNodes = [];
 
-      // Firecrawl v2 nests results under data.web or data directly
-      var results_raw = null;
-      if (data.data && Array.isArray(data.data)) {
-        results_raw = data.data;
-      } else if (data.data && Array.isArray(data.data.web)) {
-        results_raw = data.data.web;
-      } else if (Array.isArray(data.results)) {
-        results_raw = data.results;
-      }
+        if (fetchedPages.length > 0) {
+          formatted = fetchedPages.map((page, i) => {
+            const capped = page.content.slice(0, 2000);
+            resultNodes.push({ title: page.title, url: page.url, content: capped });
+            return `[Source ${i + 1}: ${page.title}]\n${page.url}\n\n${capped}`;
+          }).join('\n\n---\n\n');
+        } else {
+          formatted = scored.map((r, i) => {
+            resultNodes.push({ title: r.title, url: r.url, content: r.snippet || '' });
+            return `[Source ${i + 1}: ${r.title}]\n${r.url}\n${r.snippet || ''}`;
+          }).join('\n\n');
+        }
 
-      console.log(`[WebSearch] Got ${results_raw?.length || 0} results`);
-
-      if (!results_raw || results_raw.length === 0) {
-        return { results: [], formatted: "No results found." };
-      }
-
-      // Process all results with full content
-      const results = results_raw.map(function (item, idx) {
-        const result = {
-          rank: idx + 1,
-          title: item.title || "Untitled",
-          url: item.url || "",
-          content: (item.markdown || item.description || "").slice(0, excerptLength)
+        return {
+          result: {
+            results: resultNodes,
+            query: query,
+            pagesSearched: scored.length,
+            pagesFetched: fetchedPages.length
+          },
+          formatted: formatted
         };
-        console.log(`[WebSearch]   ${result.rank}. ${result.title} — ${result.url}`);
-        return result;
-      });
-
-      // Build formatted context for the LLM with reference-style links
-      var formatted = "Search results for: " + query + "\n\n";
-      results.forEach(function (r, i) {
-        formatted += "---\n";
-        formatted += "**[" + (i + 1) + "] " + r.title + "**\n";
-        formatted += r.content + "\n\n";
-      });
-      formatted += "---\nSources:\n";
-      results.forEach(function (r, i) {
-        formatted += "[" + (i + 1) + "] " + r.title + ": " + r.url + "\n";
-      });
-
-      return { results: results, formatted: formatted };
+      } finally {
+        // Remove the searching overlay
+        const existingOverlay = document.getElementById('web-search-overlay');
+        if (existingOverlay) existingOverlay.remove();
+      }
     }
   });
 }
