@@ -43,6 +43,9 @@
     "turndown": "^7.2.4"
   },
   "dependencies": {
-    "playwright": "^1.62.1"
+    "pdf-parse": "^2.4.5",
+    "playwright": "^1.62.1",
+    "tesseract.js": "^7.0.0",
+    "unpdf": "^1.8.0"
   }
 }
