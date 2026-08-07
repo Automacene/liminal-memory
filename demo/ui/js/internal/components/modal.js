@@ -2,7 +2,7 @@
  * Modal Component — generic open/close controller for all modals.
  */
 var Modal = (function () {
-  var modalNames = ['confirm', 'search', 'inspect', 'status', 'settings'];
+  var modalNames = ['confirm', 'search', 'inspect', 'status', 'settings', 'ingest'];
 
   function init() {
     modalNames.forEach(function (name) {

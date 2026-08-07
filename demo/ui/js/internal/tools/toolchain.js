@@ -10,14 +10,6 @@ var ToolChain = (function () {
   // === Chain Recipes ===
   var recipes = [
     {
-      name: 'web_search',
-      triggers: ['search for', 'search', 'look up', 'lookup', 'google', 'find online', 'look this up'],
-      steps: [
-        { action: 'websearch', buildParams: function (msg) { return cleanQuery(msg); } },
-        { action: 'fetch', buildParams: function (prev) { return prev && prev.results && prev.results[0] ? prev.results[0].url : null; } }
-      ]
-    },
-    {
       name: 'explain_code',
       triggers: ['how does', 'explain', 'what does', 'show me how', 'walk me through'],
       steps: [

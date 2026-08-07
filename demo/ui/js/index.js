@@ -31,6 +31,7 @@
  * internal/components/settings-modal.js — Settings panel (config + sampling + backends)
  * internal/components/selection-mode.js — Node range selection for trim/branch
  * internal/components/recall-fx.js      — Visual recall animation effect
+ * internal/components/ingest-modal.js   — Document/repo ingestion panel
  *
  * internal/tools/toolchain.js     — Multi-step deterministic tool execution
  *
@@ -44,7 +45,7 @@
  *
  * GLOBALS EXPOSED (for cross-component communication):
  *   Modal, Topbar, Chat, Input, Toolbar, SearchModal, InspectModal,
- *   StatusModal, SettingsModal, SelectionMode, RecallFX, ToolChain
+ *   StatusModal, SettingsModal, SelectionMode, RecallFX, IngestModal, ToolChain
  *
  * HELPERS:
  * ----------------------------------------------------------------
@@ -84,7 +85,10 @@ function getLoadOrder() {
     base + '/components/settings-modal.js',
     base + '/components/selection-mode.js',
     base + '/components/recall-fx.js',
+    base + '/components/ingest-modal.js',
     base + '/tools/toolchain.js',
+    base + '/mock-responses.js',
+    base + '/sovereign-loop.js',
     base + '/app.js'
   ];
 }

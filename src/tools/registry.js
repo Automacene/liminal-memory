@@ -17,7 +17,8 @@ export class ToolRegistry {
   }
 
   /**
-   * Register a tool. Indexes its description for BM25 retrieval.
+   * Register a tool. Indexes its description for BM25 retrieval
+   * unless it uses 'llm' discovery (always available, model decides).
    * @param {import('./base.js').Tool} tool
    */
   register(tool) {
@@ -26,15 +27,19 @@ export class ToolRegistry {
     }
 
     this.tools.set(tool.name, tool);
-    this.bm25.add(tool.toNode());
+
+    // Only index in BM25 if discovery is 'bm25' (default)
+    if (tool.discovery !== 'llm') {
+      this.bm25.add(tool.toNode());
+    }
     tool._registered = true;
 
-    console.log(`[ToolRegistry] Registered "${tool.name}" | total tools: ${this.tools.size}`);
+    console.log(`[ToolRegistry] Registered "${tool.name}" (discovery: ${tool.discovery}) | total tools: ${this.tools.size}`);
   }
 
   /**
    * Retrieve tools relevant to a query via BM25.
-   * Scores are normalized to 0-1 (relative to best match) for linear threshold behavior.
+   * Only returns tools with discovery:'bm25'. LLM-discovery tools are excluded.
    * @param {string} query
    * @returns {{ tool: import('./base.js').Tool, score: number }[]}
    */
@@ -60,7 +65,7 @@ export class ToolRegistry {
       const toolName = r.nodeId;
       const tool = this.tools.get(toolName);
 
-      if (tool) {
+      if (tool && tool.discovery !== 'llm') {
         matched.push({ tool, score: normalized });
         console.log(`[ToolRegistry] Match: "${tool.name}" score=${normalized.toFixed(3)} (raw: ${r.score.toFixed(3)}) for query: "${query.slice(0, 50)}"`);
       }
@@ -71,6 +76,21 @@ export class ToolRegistry {
     }
 
     return matched;
+  }
+
+  /**
+   * Get all tools with discovery:'llm' — these are always presented
+   * in the LLM's prompt and the model decides when to invoke them.
+   * @returns {import('./base.js').Tool[]}
+   */
+  getLLMTools() {
+    const llmTools = [];
+    for (const tool of this.tools.values()) {
+      if (tool.discovery === 'llm') {
+        llmTools.push(tool);
+      }
+    }
+    return llmTools;
   }
 
   /**
