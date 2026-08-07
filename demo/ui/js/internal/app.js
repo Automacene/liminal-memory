@@ -506,6 +506,7 @@
     var sideArchives = document.getElementById('side-archives');
     if (sideArchives) sideArchives.textContent = s.archiveBlocks;
   }
+  window._refreshStats = refreshStats;
 
   // === Recheck LLM ===
   var _recheckAbort = null;

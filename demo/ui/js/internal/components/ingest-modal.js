@@ -5,6 +5,12 @@
 var IngestModal = (function () {
   var activeTab = 'file';
   var selectedFile = null;
+  var selectedFolder = null;
+  var selectedFolderName = '';
+
+  // Valid extensions for folder ingestion
+  var validExts = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.py', '.rs', '.go', '.java', '.c', '.cpp', '.h', '.rb', '.php', '.md', '.txt', '.yaml', '.yml', '.toml', '.json', '.css', '.html', '.svelte', '.vue', '.astro', '.sh', '.sql'];
+  var ignoreNames = ['node_modules', '.git', 'dist', 'build', 'out', 'target', 'vendor', '.next', '__pycache__', 'coverage', '.cache', '.vscode', '.idea'];
 
   function init() {
     // Tab switching
@@ -60,10 +66,48 @@ var IngestModal = (function () {
     // Ingest button
     document.getElementById('ingest-run-btn').addEventListener('click', runIngest);
 
+    // Folder browse button (File System Access API)
+    document.getElementById('ingest-folder-browse').addEventListener('click', async function () {
+      try {
+        var dirHandle = await window.showDirectoryPicker();
+        selectedFolderName = dirHandle.name;
+        var files = [];
+        await walkDirectory(dirHandle, '', files);
+        selectedFolder = files;
+        var pathEl = document.getElementById('ingest-folder-path');
+        pathEl.textContent = '✓ "' + selectedFolderName + '" — ' + files.length + ' files found';
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          document.getElementById('ingest-folder-path').textContent = '✗ ' + e.message;
+        }
+      }
+    });
+
     // Open button
     document.getElementById('btn-ingest').addEventListener('click', function () {
       Modal.open('ingest');
     });
+  }
+
+  /**
+   * Recursively walk a directory handle, collecting valid files.
+   */
+  async function walkDirectory(dirHandle, relPath, files) {
+    for await (var entry of dirHandle.values()) {
+      var name = entry.name;
+      if (name.startsWith('.') || ignoreNames.indexOf(name) !== -1) continue;
+
+      if (entry.kind === 'directory') {
+        var subPath = relPath ? relPath + '/' + name : name;
+        await walkDirectory(entry, subPath, files);
+      } else if (entry.kind === 'file') {
+        var ext = '.' + name.split('.').pop().toLowerCase();
+        if (validExts.indexOf(ext) === -1) continue;
+        var file = await entry.getFile();
+        file._relPath = relPath ? relPath + '/' + name : name;
+        files.push(file);
+      }
+    }
   }
 
   async function runIngest() {
@@ -128,36 +172,29 @@ var IngestModal = (function () {
     resultEl.style.color = '#7fdbca';
     resultEl.textContent = '✓ Ingested ' + count + ' nodes from "' + selectedFile.name + '" (' + data.totalChars.toLocaleString() + ' chars)';
 
+    // Update UI stats
+    if (window._refreshStats) window._refreshStats();
+
+    // Show in chat
+    if (typeof Chat !== 'undefined' && Chat.renderSystem) {
+      Chat.renderSystem('⬆ Ingested ' + count + ' nodes from "' + selectedFile.name + '"');
+    }
+
     // Auto-save
     saveState(memory);
   }
 
   async function ingestRepo(resultEl) {
-    var urlInput = document.getElementById('ingest-repo-url');
-    var repoUrl = urlInput.value.trim();
-    if (!repoUrl) {
+    if (!selectedFolder || selectedFolder.length === 0) {
       resultEl.style.color = '#ff6b6b';
-      resultEl.textContent = 'Enter a git repo URL.';
+      resultEl.textContent = 'No folder selected.';
       return;
     }
 
     resultEl.style.color = '#888';
-    resultEl.textContent = 'Cloning and ingesting... (this may take a moment)';
+    resultEl.textContent = 'Ingesting ' + selectedFolder.length + ' files...';
 
-    var res = await fetch('/api/ingest/repo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: repoUrl })
-    });
-
-    var data = await res.json();
-    if (data.error) {
-      resultEl.style.color = '#ff6b6b';
-      resultEl.textContent = '✗ ' + data.error;
-      return;
-    }
-
-    // Store chunks as nodes in memory
+    // Read all files from the selected folder via File System Access API
     var memory = window._luminalMemory;
     if (!memory) {
       resultEl.style.color = '#ff6b6b';
@@ -165,10 +202,46 @@ var IngestModal = (function () {
       return;
     }
 
-    var repoName = repoUrl.split('/').pop().replace('.git', '') || 'repo';
-    var count = storeNodes(memory, data.nodes, repoName);
+    var allChunks = [];
+    var filesProcessed = 0;
+
+    for (var i = 0; i < selectedFolder.length; i++) {
+      var file = selectedFolder[i];
+      try {
+        var text = await file.text();
+        if (text.length < 30 || text.length > 50000) continue;
+
+        var res = await fetch('/api/ingest/file?filename=' + encodeURIComponent(file._relPath || file.name), {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: text
+        });
+        var data = await res.json();
+        if (data.nodes && data.nodes.length > 0) {
+          allChunks.push(...data.nodes);
+          filesProcessed++;
+        }
+      } catch (e) { /* skip unreadable */ }
+    }
+
+    if (allChunks.length === 0) {
+      resultEl.style.color = '#ff6b6b';
+      resultEl.textContent = '✗ No content found in selected folder.';
+      return;
+    }
+
+    var folderName = selectedFolderName || 'folder';
+    var count = storeNodes(memory, allChunks, folderName);
     resultEl.style.color = '#7fdbca';
-    resultEl.textContent = '✓ Ingested ' + count + ' nodes from "' + repoName + '" (' + data.totalChunks + ' chunks)';
+    resultEl.textContent = '✓ Ingested ' + count + ' nodes from ' + filesProcessed + ' files in "' + folderName + '"';
+
+    // Update UI stats
+    if (window._refreshStats) window._refreshStats();
+
+    // Show in chat
+    if (typeof Chat !== 'undefined' && Chat.renderSystem) {
+      Chat.renderSystem('⬆ Ingested ' + count + ' nodes from folder "' + folderName + '" (' + filesProcessed + ' files)');
+    }
 
     // Auto-save
     saveState(memory);

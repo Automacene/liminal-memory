@@ -298,7 +298,7 @@
       <!-- Tabs -->
       <div style="display:flex;gap:12px;margin-bottom:16px;">
         <button class="btn-action active" id="ingest-tab-file" style="flex:1;">📄 Upload File</button>
-        <button class="btn-action" id="ingest-tab-repo" style="flex:1;">📦 Git Repo</button>
+        <button class="btn-action" id="ingest-tab-repo" style="flex:1;">📂 Folder</button>
       </div>
 
       <!-- File Upload Panel -->
@@ -313,8 +313,11 @@
 
       <!-- Git Repo Panel -->
       <div id="ingest-panel-repo" style="display:none;">
-        <input type="text" id="ingest-repo-url" placeholder="https://github.com/user/repo.git" style="width:100%;padding:10px 12px;background:#111;border:1px solid #333;border-radius:6px;color:#eee;font-size:0.95rem;margin-bottom:12px;">
-        <div style="font-size:0.8rem;color:#666;margin-bottom:12px;">Public repos only. Clones shallow (--depth 1). Auto-ignores: node_modules, .git, dist, build, vendor, lock files.</div>
+        <div style="margin-bottom:12px;">
+          <button class="btn-action" id="ingest-folder-browse" style="width:100%;padding:12px;font-size:0.95rem;">📂 Browse for folder...</button>
+        </div>
+        <div id="ingest-folder-path" style="font-size:0.9rem;color:#aaa;margin-bottom:8px;min-height:20px;word-break:break-all;"></div>
+        <div style="font-size:0.8rem;color:#666;margin-bottom:12px;">Select any folder on your machine. Auto-ignores: node_modules, .git, dist, build, vendor, lock files.</div>
         <div id="ingest-repo-status" style="font-size:0.85rem;color:#888;min-height:20px;"></div>
       </div>
 
