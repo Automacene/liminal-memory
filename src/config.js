@@ -79,6 +79,9 @@ export const defaultConfig = {
   // Kill switch for web search. Set to false to disable all web search attempts.
   webSearchEnabled: false,
 
+  // How many hops to follow node links during recall expansion. 0 = no expansion.
+  linkDistance: 2,
+
 
   // ===== SEARCH TUNING =====
 

@@ -29,7 +29,9 @@ export class Chain {
       timestamp: Date.now(),
       tokenCount: estimateTokens(content),
       pocketNotes: [],
-      metadata
+      metadata,
+      keywords: extractKeywordsFromContent(content),
+      graph: { edges_to: [], edges_from: [] }
     };
     this.nodes.push(node);
     this.nextId++;
@@ -54,7 +56,9 @@ export class Chain {
       timestamp: Date.now(),
       tokenCount: estimateTokens(content),
       pocketNotes: [],
-      metadata
+      metadata,
+      keywords: extractKeywordsFromContent(content),
+      graph: { edges_to: [], edges_from: [] }
     };
     this.nodes.push(node);
     this.nextId++;
@@ -106,6 +110,23 @@ export class Chain {
    */
   get(id) {
     return this.nodes.find(n => n.id === id);
+  }
+
+  /**
+   * Create a directional edge from one node to another.
+   * The "from" node discovered/referenced the "to" node.
+   * @param {number} fromNodeId - the node that triggered the discovery
+   * @param {number} toNodeId - the node that was found/referenced
+   */
+  link(fromNodeId, toNodeId) {
+    if (fromNodeId === toNodeId) return;
+    const from = this.get(fromNodeId);
+    const to = this.get(toNodeId);
+    if (!from || !to) return;
+    if (!from.graph) from.graph = { edges_to: [], edges_from: [] };
+    if (!to.graph) to.graph = { edges_to: [], edges_from: [] };
+    if (!from.graph.edges_to.includes(toNodeId)) from.graph.edges_to.push(toNodeId);
+    if (!to.graph.edges_from.includes(fromNodeId)) to.graph.edges_from.push(fromNodeId);
   }
 
   /**
@@ -220,4 +241,28 @@ export class Chain {
 function estimateTokens(text) {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
+}
+
+const STOPWORDS = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','might','shall','can','may','must','need','this','that','these','those','which','what','who','whom','where','when','why','how','not','no','nor','but','and','or','if','then','else','than','too','very','just','about','all','also','any','because','before','between','both','by','each','few','for','from','further','here','in','into','its','more','most','of','on','once','only','other','out','over','own','same','so','some','such','their','them','there','through','to','under','until','up','us','we','with','you','your','our','it','they','he','she','him','her','his','my','me','i','am','at','as']);
+
+/**
+ * Extract keywords from content (string or object).
+ * Flattens to text, tokenizes, removes stopwords, deduplicates.
+ * @param {any} content
+ * @returns {string[]}
+ */
+function extractKeywordsFromContent(content) {
+  const text = flattenContent(content);
+  const words = text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !STOPWORDS.has(w));
+  return Array.from(new Set(words));
+}
+
+function flattenContent(val) {
+  if (typeof val === 'string') return val;
+  if (Array.isArray(val)) return val.map(flattenContent).join(' ');
+  if (val && typeof val === 'object') return Object.values(val).map(flattenContent).join(' ');
+  return String(val || '');
 }

@@ -326,6 +326,24 @@ var SovereignLoop = (function () {
         }
       }
 
+      // === ENRICHED RECALL: Use user query + sovereign response for deeper BM25 ===
+      // Ephemeral has both sides now — search with combined terms to find missed nodes
+      var enrichedQuery = (userMsg + ' ' + (response || '').slice(0, 300)).slice(0, 500);
+      var enrichedResults = memory.bm25.search(enrichedQuery, 6);
+      var currentNodeId = memory.chain.all()[memory.chain.length - 1]?.id;
+      if (currentNodeId && enrichedResults.length > 0) {
+        for (var ei = 0; ei < enrichedResults.length; ei++) {
+          memory.chain.link(currentNodeId, enrichedResults[ei].nodeId);
+        }
+        // Also link enriched results to each other (co-retrieval = association)
+        for (var ea = 0; ea < enrichedResults.length; ea++) {
+          for (var eb = ea + 1; eb < enrichedResults.length; eb++) {
+            memory.chain.link(enrichedResults[ea].nodeId, enrichedResults[eb].nodeId);
+          }
+        }
+        console.log('[Graph:Enriched] Linked ' + enrichedResults.length + ' nodes from enriched recall (query: "' + enrichedQuery.slice(0, 60) + '...")');
+      }
+
       // === AUTO-SEARCH: Fill knowledge gaps mid-loop ===
       if (payload.unresolved_tension && payload.unresolved_tension.length > 20 && payload.requires_further_recursion) {
         // Kill switch — skip if web search is disabled
@@ -525,7 +543,7 @@ var SovereignLoop = (function () {
         fetch('/api/state/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(await memory.export())
+          body: JSON.stringify(await memory.export(), null, 2)
         });
       } catch (e) { /* non-critical */ }
     }

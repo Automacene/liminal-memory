@@ -108,7 +108,7 @@ export async function createProfile(dataDir, name) {
 
   // Write empty state
   const emptyState = { chain: { nodes: [], nextId: 1 }, bm25: { documents: {} } };
-  await writeFile(filePath, JSON.stringify(emptyState), 'utf8');
+  await writeFile(filePath, JSON.stringify(emptyState, null, 2), 'utf8');
   return { success: true };
 }
 
