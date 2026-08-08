@@ -28,6 +28,7 @@
   window._luminalMemory = memory;
   var ready = false;
   var llmAvailable = false;
+  var _pendingRemotePrompt = null; // holds a control-channel prompt that arrived pre-init
 
   // Stream state (shared with SovereignLoop)
   var streamState = {
@@ -236,6 +237,20 @@
     DocGen.init();
     DocGenIngest.init();
     Input.init(handleSend);
+
+    // Dev control channel (control-client.js → serve.js): allow remote prompt injection.
+    // If a prompt lands before init finishes, hold the latest and fire it once ready.
+    window.addEventListener('luminal:remote-prompt', function (e) {
+      var text = e && e.detail && e.detail.text;
+      if (!text) return;
+      if (ready) {
+        handleSend(text);
+      } else {
+        _pendingRemotePrompt = text;
+        console.warn('[Control] Prompt queued — app not ready yet');
+      }
+    });
+
     Toolbar.init({
       onTrim: handleTrim,
       onBranch: handleBranch,
@@ -268,6 +283,14 @@
     ready = true;
     Topbar.setStatus('active', llmAvailable ? 'READY' : 'MOCK LLM');
     refreshStats();
+
+    // Flush any control-channel prompt that arrived while we were still initializing.
+    if (_pendingRemotePrompt) {
+      var _queued = _pendingRemotePrompt;
+      _pendingRemotePrompt = null;
+      console.log('[Control] Flushing queued prompt now that app is ready');
+      handleSend(_queued);
+    }
 
     // Settings change listener
     var _recheckTimer = null;
@@ -406,57 +429,15 @@
         }
       }
 
-      // Recall
+      // Recall — delegated to the library's retrieval engine (src/core/retrieval.js),
+      // the SAME path LuminalMemory.chat() uses: BM25 recall + N-hop graph expansion +
+      // relevance ranking + edge creation from this turn to whatever it recalls. The demo
+      // used to re-implement all of this inline; it now calls the library so it exercises
+      // the real code on every turn and can't silently drift from it (ROADMAP.md Phase 1.5).
+      // The [Graph:Expand] / [Graph] trace lines now originate in the library itself.
       var windowNodes = memory.getWindow();
-      var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
-      var searchResults = memory.bm25.search(msg, 10);
-      var recallNodeIds = searchResults
-        .filter(function (r) { return !windowIds.has(r.nodeId); })
-        .slice(0, memory.config.maxRetrievedNodes)
-        .map(function (r) { return r.nodeId; });
-
-      // Link expansion: follow edges up to N hops to find additional related nodes
-      var linkDistance = memory.config.linkDistance || 1;
-      if (linkDistance > 0 && recallNodeIds.length > 0) {
-        var expanded = new Set(recallNodeIds);
-        var frontier = recallNodeIds.slice();
-        for (var hop = 0; hop < linkDistance; hop++) {
-          var nextFrontier = [];
-          for (var fi = 0; fi < frontier.length; fi++) {
-            var fNode = memory.chain.get(frontier[fi]);
-            if (fNode && fNode.graph) {
-              // Follow both edge directions for discovery
-              var allEdges = (fNode.graph.edges_to || []).concat(fNode.graph.edges_from || []);
-              for (var li = 0; li < allEdges.length; li++) {
-                var linkedId = allEdges[li];
-                if (!expanded.has(linkedId) && !windowIds.has(linkedId)) {
-                  expanded.add(linkedId);
-                  nextFrontier.push(linkedId);
-                }
-              }
-            }
-          }
-          frontier = nextFrontier;
-        }
-        var expandedCount = expanded.size - recallNodeIds.length;
-        if (expandedCount > 0) {
-          console.log('[Graph:Expand] BM25 found ' + recallNodeIds.length + ' → expanded to ' + expanded.size + ' via ' + linkDistance + '-hop traversal (+' + expandedCount + ' linked nodes)');
-        }
-        // Add expanded nodes (cap total)
-        recallNodeIds = Array.from(expanded).slice(0, memory.config.maxRetrievedNodes * 2);
-      }
-
-      var recallNodes = recallNodeIds
-        .map(function (id) { return memory.chain.get(id); })
-        .filter(Boolean);
-
-      // Create directional edges: current turn → recalled nodes
-      for (var rli = 0; rli < recallNodes.length; rli++) {
-        memory.chain.link(pendingNode.id, recallNodes[rli].id);
-      }
-      if (recallNodes.length > 0) {
-        console.log('[Graph] Node ' + pendingNode.id + ' edges_to ' + recallNodes.length + ' recalled nodes');
-      }
+      var recall = await memory.retrieval.retrieve(msg, windowNodes, pendingNode.id);
+      var recallNodes = recall.nodes;
 
       if (recallNodes.length > 0) {
         Chat.renderRecall(recallNodes.length);

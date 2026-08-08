@@ -22,7 +22,8 @@
     "build": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.min.js --format=esm",
     "build:umd": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.umd.js --format=iife --global-name=LuminalMemory",
     "test": "node --test tests/*.test.js",
-    "dev": "esbuild src/index.js --bundle --outfile=dist/luminal-memory.js --format=esm --watch"
+    "dev": "esbuild src/index.js --bundle --outfile=dist/luminal-memory.js --format=esm --watch",
+    "demo": "npm run build:umd && node serve.js"
   },
   "keywords": [
     "llm",
@@ -40,9 +41,7 @@
     "cheerio": "^1.2.0",
     "esbuild": "^0.21.0",
     "gifuct-js": "^2.1.2",
-    "turndown": "^7.2.4"
-  },
-  "dependencies": {
+    "turndown": "^7.2.4",
     "pdf-parse": "^2.4.5",
     "playwright": "^1.62.1",
     "tesseract.js": "^7.0.0",
