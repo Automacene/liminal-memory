@@ -13,7 +13,8 @@ var SettingsModal = (function () {
     recall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>',
     memory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>',
     tools: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>',
-    sampling: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>'
+    sampling: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>',
+    profiles: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
   };
 
   var GROUP_DESCRIPTIONS = {
@@ -22,7 +23,8 @@ var SettingsModal = (function () {
     recall: 'Tune how aggressively historical context is retrieved.',
     memory: 'Set storage limits and archival behavior.',
     tools: 'Configure automatic tool discovery and matching.',
-    sampling: 'Generation parameters pulled from your running server.'
+    sampling: 'Generation parameters pulled from your running server.',
+    profiles: 'Switch between memory profiles or create new ones.'
   };
 
   function init(memory) {
@@ -48,6 +50,8 @@ var SettingsModal = (function () {
 
     // Build left nav
     var sortedGroups = Object.entries(groups).sort(function (a, b) { return a[1].order - b[1].order; });
+    // Add profiles tab (demo-only, not from library schema)
+    sortedGroups.push(['profiles', { label: 'Profiles', order: 99 }]);
     var navHtml = '';
     sortedGroups.forEach(function (entry) {
       var key = entry[0], meta = entry[1];
@@ -68,7 +72,7 @@ var SettingsModal = (function () {
     });
 
     // Build right content
-    var groupMeta = groups[activeGroup];
+    var groupMeta = groups[activeGroup] || { label: activeGroup.charAt(0).toUpperCase() + activeGroup.slice(1) };
     var html = '';
 
     // Section header
@@ -81,12 +85,16 @@ var SettingsModal = (function () {
       html += renderSamplingTab(samplingSchema, values.sampling);
     } else if (activeGroup === 'connection') {
       html += renderConnectionTab(fields, values.connection || {});
+    } else if (activeGroup === 'profiles') {
+      html += renderProfilesTab();
     } else {
       html += renderStaticFields(fields, values[activeGroup] || {});
     }
 
     bodyEl.innerHTML = html;
-    wireHandlers(activeGroup === 'sampling' ? samplingSchema : fields);
+    if (activeGroup !== 'profiles') {
+      wireHandlers(activeGroup === 'sampling' ? samplingSchema : fields);
+    }
   }
 
   function renderStaticFields(fields, groupValues) {
@@ -218,6 +226,110 @@ var SettingsModal = (function () {
     });
 
     return html;
+  }
+
+  function renderProfilesTab() {
+    var html = '';
+    html += '<div class="settings-field" id="profiles-container">';
+    html += '<div style="margin-bottom:16px;"><button class="btn-action" id="profiles-refresh" style="margin-right:8px;">↻ Refresh</button>';
+    html += '<button class="btn-action" id="profiles-create" style="color:#87ceeb;border-color:#87ceeb;">+ New Profile</button></div>';
+    html += '<div id="profiles-list" style="font-size:0.9rem;color:#aaa;">Loading...</div>';
+    html += '</div>';
+
+    // Wire up after render
+    setTimeout(function () {
+      loadProfilesList();
+      var refreshBtn = document.getElementById('profiles-refresh');
+      if (refreshBtn) refreshBtn.addEventListener('click', loadProfilesList);
+      var createBtn = document.getElementById('profiles-create');
+      if (createBtn) createBtn.addEventListener('click', createNewProfile);
+    }, 50);
+
+    return html;
+  }
+
+  async function loadProfilesList() {
+    var listEl = document.getElementById('profiles-list');
+    if (!listEl) return;
+    listEl.textContent = 'Loading...';
+
+    try {
+      var res = await fetch('/api/profiles');
+      var data = await res.json();
+      var html = '';
+
+      data.profiles.forEach(function (p) {
+        var isActive = p.name === data.active;
+        var sizeKB = (p.size / 1024).toFixed(1);
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin-bottom:6px;background:' + (isActive ? '#1a2a3a' : '#111') + ';border:1px solid ' + (isActive ? '#87ceeb' : '#333') + ';border-radius:6px;">';
+        html += '<div>';
+        html += '<strong style="color:' + (isActive ? '#87ceeb' : '#eee') + ';">' + p.name + '</strong>';
+        if (isActive) html += ' <span style="color:#87ceeb;font-size:0.75rem;">(active)</span>';
+        html += '<div style="font-size:0.8rem;color:#666;">' + p.nodeCount + ' nodes · ' + sizeKB + ' KB</div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:6px;">';
+        if (!isActive) {
+          html += '<button class="btn-action profiles-switch-btn" data-name="' + p.name + '" style="font-size:0.8rem;padding:4px 8px;">Switch</button>';
+          if (p.name !== 'state') {
+            html += '<button class="btn-action profiles-delete-btn" data-name="' + p.name + '" style="font-size:0.8rem;padding:4px 8px;color:#ff6b6b;border-color:#ff6b6b;">✕</button>';
+          }
+        }
+        html += '</div>';
+        html += '</div>';
+      });
+
+      listEl.innerHTML = html;
+
+      // Wire switch buttons
+      listEl.querySelectorAll('.profiles-switch-btn').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var name = btn.getAttribute('data-name');
+          if (!confirm('Switch to profile "' + name + '"? The page will reload.')) return;
+          await fetch('/api/profiles/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+          });
+          window.location.reload();
+        });
+      });
+
+      // Wire delete buttons
+      listEl.querySelectorAll('.profiles-delete-btn').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var name = btn.getAttribute('data-name');
+          if (!confirm('Delete profile "' + name + '"? This cannot be undone.')) return;
+          await fetch('/api/profiles/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+          });
+          loadProfilesList();
+        });
+      });
+    } catch (err) {
+      listEl.textContent = 'Error loading profiles: ' + err.message;
+    }
+  }
+
+  async function createNewProfile() {
+    var name = prompt('New profile name:\n(lowercase, alphanumeric, dashes only)');
+    if (!name) return;
+    name = name.toLowerCase().replace(/[^a-z0-9\-]/g, '-').replace(/^-|-$/g, '');
+    if (!name) return;
+
+    var res = await fetch('/api/profiles/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    });
+    var data = await res.json();
+    if (data.success) {
+      Chat.renderSystem('✓ Created profile: "' + name + '"');
+      loadProfilesList();
+    } else {
+      alert('Failed: ' + data.error);
+    }
   }
 
   function renderField(key, meta, value) {

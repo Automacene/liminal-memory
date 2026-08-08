@@ -4,7 +4,7 @@
  * Then open: http://localhost:3000/demo/
  */
 import { createServer } from "node:http";
-import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { readFile, readdir, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
@@ -160,6 +160,60 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // === API: DocGen — Generate documentation for a folder (SSE progress) ===
+  if (pathname === "/api/docgen" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { rootDir } = JSON.parse(body);
+        if (!rootDir) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "No rootDir provided" }));
+          return;
+        }
+
+        const fullRoot = resolve(__dirname, rootDir);
+        const outputPath = join(fullRoot, 'DOCUMENTATION.md');
+
+        // Use SSE to stream progress
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        });
+
+        const sendEvent = (type, data) => {
+          res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
+        };
+
+        const { generateDocumentation } = await import("./src/extensions/docgen.js");
+        const result = await generateDocumentation(fullRoot, outputPath, {
+          llmConfig: {
+            endpoint: 'http://127.0.0.1:11434',
+            apiFormat: 'ollama',
+            model: 'gemma4-e4b:gpu',
+            thinking: false
+          },
+          onProgress: (msg) => {
+            console.log('[DocGen]', msg);
+            sendEvent('progress', msg);
+          }
+        });
+
+        sendEvent('done', { filesDocumented: result.filesDocumented, totalFunctions: result.totalFunctions, outputPath });
+        res.end();
+      } catch (err) {
+        console.error('[DocGen] Error:', err.message);
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'error', data: err.message })}\n\n`);
+        } catch {}
+        res.end();
+      }
+    });
+    return;
+  }
+
   // === API: Fetch & Parse URL to Markdown (cheerio + turndown) ===
   if (pathname === "/api/fetch") {
     const targetUrl = url.searchParams.get("url") || "";
@@ -304,17 +358,52 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // === API: Save/Load Settings (persistent across restarts) ===
+  if (pathname === "/api/settings/save" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        if (!existsSync(STATE_DIR)) await mkdir(STATE_DIR, { recursive: true });
+        await writeFile(join(STATE_DIR, 'settings.json'), body, 'utf8');
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (pathname === "/api/settings/load") {
+    const settingsPath = join(STATE_DIR, 'settings.json');
+    try {
+      await stat(settingsPath);
+      const data = await readFile(settingsPath, 'utf8');
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(data);
+    } catch {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({}));
+    }
+    return;
+  }
+
   // === API: Save memory state ===
   if (pathname === "/api/state/save" && req.method === "POST") {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        // Ensure data directory exists
         if (!existsSync(STATE_DIR)) await mkdir(STATE_DIR, { recursive: true });
-        await writeFile(STATE_FILE, body, 'utf8');
+        // Save to active profile
+        const { getActiveProfile, getProfilePath } = await import("./src/extensions/memory-profiles.js");
+        const active = await getActiveProfile(STATE_DIR);
+        const savePath = getProfilePath(STATE_DIR, active);
+        await writeFile(savePath, body, 'utf8');
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, size: body.length }));
+        res.end(JSON.stringify({ ok: true, size: body.length, profile: active }));
       } catch (err) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -326,18 +415,89 @@ const server = createServer(async (req, res) => {
   // === API: Load memory state ===
   if (pathname === "/api/state/load") {
     try {
-      if (!existsSync(STATE_FILE)) {
+      const { getActiveProfile, getProfilePath } = await import("./src/extensions/memory-profiles.js");
+      const active = await getActiveProfile(STATE_DIR);
+      const loadPath = getProfilePath(STATE_DIR, active);
+      try {
+        await stat(loadPath);
+      } catch {
         res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "No saved state" }));
+        res.end(JSON.stringify({ error: "No saved state", profile: active }));
         return;
       }
-      const data = await readFile(STATE_FILE, 'utf8');
+      const data = await readFile(loadPath, 'utf8');
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(data);
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: err.message }));
     }
+    return;
+  }
+
+  // === API: Memory Profiles ===
+  if (pathname === "/api/profiles" && req.method === "GET") {
+    const { listProfiles, getActiveProfile } = await import("./src/extensions/memory-profiles.js");
+    const profiles = await listProfiles(STATE_DIR);
+    const active = await getActiveProfile(STATE_DIR);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ profiles, active }));
+    return;
+  }
+
+  if (pathname === "/api/profiles/active" && req.method === "GET") {
+    const { getActiveProfile, getProfilePath } = await import("./src/extensions/memory-profiles.js");
+    const active = await getActiveProfile(STATE_DIR);
+    const path = getProfilePath(STATE_DIR, active);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ active, path }));
+    return;
+  }
+
+  if (pathname === "/api/profiles/create" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      const { name } = JSON.parse(body);
+      const { createProfile } = await import("./src/extensions/memory-profiles.js");
+      const result = await createProfile(STATE_DIR, name);
+      res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    });
+    return;
+  }
+
+  if (pathname === "/api/profiles/switch" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      const { name } = JSON.parse(body);
+      const { setActiveProfile, getProfilePath } = await import("./src/extensions/memory-profiles.js");
+      const profilePath = getProfilePath(STATE_DIR, name);
+      try {
+        await stat(profilePath);
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: 'Profile not found.' }));
+        return;
+      }
+      await setActiveProfile(STATE_DIR, name);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, active: name }));
+    });
+    return;
+  }
+
+  if (pathname === "/api/profiles/delete" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      const { name } = JSON.parse(body);
+      const { deleteProfile } = await import("./src/extensions/memory-profiles.js");
+      const result = await deleteProfile(STATE_DIR, name);
+      res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    });
     return;
   }
 

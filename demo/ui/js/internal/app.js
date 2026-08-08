@@ -65,6 +65,17 @@
       delete state.config;
       await memory.import(state);
       console.log('[Restore] Restored ' + memory.chain.length + ' nodes from server');
+
+      // Rebuild BM25 index if it wasn't in the saved state (e.g. DocGen ingest profiles)
+      if (!state.bm25 || !state.bm25.documents || Object.keys(state.bm25.documents).length === 0) {
+        console.log('[Restore] BM25 index empty — rebuilding from chain...');
+        var allNodes = memory.chain.all();
+        for (var ri = 0; ri < allNodes.length; ri++) {
+          memory.bm25.add(allNodes[ri]);
+        }
+        console.log('[Restore] BM25 rebuilt: ' + allNodes.length + ' nodes indexed');
+      }
+
       return true;
     } catch (e) {
       console.warn('[Restore] Failed:', e.message);
@@ -109,6 +120,25 @@
     Modal.init();
 
     await memory.init();
+
+    // Restore saved settings (persistent across restarts)
+    try {
+      var settingsRes = await fetch('/api/settings/load');
+      if (settingsRes.ok) {
+        var savedSettings = await settingsRes.json();
+        if (savedSettings && typeof savedSettings === 'object') {
+          Object.keys(savedSettings).forEach(function (group) {
+            if (typeof savedSettings[group] === 'object') {
+              Object.keys(savedSettings[group]).forEach(function (key) {
+                memory.settings.set(key, savedSettings[group][key]);
+              });
+            }
+          });
+          CONFIG = memory.config;
+          console.log('[Init] Restored saved settings');
+        }
+      }
+    } catch (e) { /* no saved settings, use defaults */ }
 
     // Try restoring saved state — skip fixture if we have saved data
     var restored = await tryRestore();
@@ -203,6 +233,8 @@
     StatusModal.init(memory);
     SettingsModal.init(memory);
     IngestModal.init();
+    DocGen.init();
+    DocGenIngest.init();
     Input.init(handleSend);
     Toolbar.init({
       onTrim: handleTrim,
@@ -239,12 +271,23 @@
 
     // Settings change listener
     var _recheckTimer = null;
+    var _settingsSaveTimer = null;
     memory.settings.onChange(function (key) {
       refreshStats();
       if (key === 'endpoint' || key === 'apiFormat' || key === 'model') {
         clearTimeout(_recheckTimer);
         _recheckTimer = setTimeout(recheckLLM, 150);
       }
+      // Persist settings to disk (debounced)
+      clearTimeout(_settingsSaveTimer);
+      _settingsSaveTimer = setTimeout(function () {
+        var allSettings = memory.settings.getAll();
+        fetch('/api/settings/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(allSettings)
+        }).catch(function () {});
+      }, 500);
     });
 
     if (!llmAvailable) {
