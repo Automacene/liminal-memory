@@ -330,8 +330,11 @@
   </div>
 
   <!-- ============================================================
-       SCRIPTS — Load order: library → canvas → components → app
+       SCRIPTS — Load order: log relay → library → canvas → components → app
+       log-relay.js MUST be first — it wraps console.log/warn/error so
+       nothing logs before the mirror-to-server relay is in place.
   ============================================================ -->
+  <script src="ui/js/internal/log-relay.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/lib/marked.umd.min.js"></script>
@@ -362,5 +365,6 @@
   <script src="ui/js/internal/mock-responses.js"></script>
   <script src="ui/js/internal/sovereign-loop.js"></script>
   <script src="ui/js/internal/app.js"></script>
+  <script src="ui/js/internal/control-client.js"></script>
 </body>
 </html>

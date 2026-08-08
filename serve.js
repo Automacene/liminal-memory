@@ -8,12 +8,13 @@ import { readFile, readdir, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { exec } from "node:child_process";
 import { load as cheerioLoad } from "cheerio";
 import TurndownService from "turndown";
 import { extractPdfText, chunkDocument } from "./src/extensions/ingest-file.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const PORT = 3000;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const STATE_DIR = join(__dirname, "data");
 const STATE_FILE = join(STATE_DIR, "memory-state.json");
 
@@ -29,6 +30,20 @@ const MIME_TYPES = {
 
 // Directories to skip when searching/listing
 const SKIP = new Set(["node_modules", "dist", ".git", ".kiro", ".vscode"]);
+
+// === Dev control channel (Server-Sent Events) ===
+// Lets whoever is running the server (including Claude, via curl) drive the open demo
+// tab: push a UI refresh after a rebuild, or inject a prompt into Sovereign, then read
+// the mirrored console output back from /api/log. Purely a local dev aid — it lives in
+// serve.js (built on top of the library), never in the shipped library itself.
+const sseClients = new Set();
+function broadcastControl(event, dataObj) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(dataObj || {})}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch { /* client gone — cleaned up on its 'close' */ }
+  }
+  return sseClients.size;
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -348,12 +363,83 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const { exec } = await import("node:child_process");
     exec(cmd, { cwd: __dirname, timeout: 5000 }, (err, stdout, stderr) => {
       const output = stdout || stderr || (err ? err.message : 'no output');
       const formatted = `## Shell: \`${cmd}\`\n\n\`\`\`\n${output.slice(0, 4000)}\n\`\`\``;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ results: output, formatted: formatted }));
+    });
+    return;
+  }
+
+  // === API: Log Relay — mirrors browser console output to the terminal + a file on disk ===
+  // Lets Claude (or anyone without eyes on the actual browser) read what happened during
+  // a real session after the fact. See demo/ui/js/internal/log-relay.js for the client side.
+  if (pathname === "/api/log" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { level, text, timestamp } = JSON.parse(body);
+        const time = new Date(timestamp || Date.now()).toISOString();
+        const line = `[${time}] [browser:${level || 'log'}] ${text}\n`;
+
+        // Print to the terminal running `node serve.js`
+        process.stdout.write(line);
+
+        // Also append to a durable log file so it can be read after the fact
+        const logDir = join(__dirname, "tmp");
+        if (!existsSync(logDir)) await mkdir(logDir, { recursive: true });
+        const { appendFile } = await import("node:fs/promises");
+        await appendFile(join(logDir, "browser-console.log"), line, "utf8");
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // === API: Dev control channel ===
+  // The demo page holds /api/control/stream open (SSE) and reacts to pushed events.
+  // POST /api/control/refresh and /api/control/prompt broadcast to every open tab.
+  if (pathname === "/api/control/stream" && req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    });
+    res.write(": connected\n\n");
+    sseClients.add(res);
+    const heartbeat = setInterval(() => { try { res.write(": ping\n\n"); } catch { /* closing */ } }, 20000);
+    req.on("close", () => { clearInterval(heartbeat); sseClients.delete(res); });
+    return;
+  }
+
+  if (pathname === "/api/control/refresh" && req.method === "POST") {
+    const clients = broadcastControl("refresh", { at: Date.now() });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, clients }));
+    return;
+  }
+
+  if (pathname === "/api/control/prompt" && req.method === "POST") {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      let text = '';
+      try { text = (JSON.parse(body || '{}').text || '').toString(); } catch { text = ''; }
+      if (!text.trim()) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "missing 'text'" }));
+        return;
+      }
+      const clients = broadcastControl("prompt", { text });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, clients, text }));
     });
     return;
   }
@@ -520,13 +606,27 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
+  const demoUrl = `http://localhost:${PORT}/demo/`;
+
   console.log(`\n  Luminal Memory dev server running at:\n`);
-  console.log(`  → http://localhost:${PORT}/demo/\n`);
+  console.log(`  → ${demoUrl}\n`);
   console.log(`  API endpoints:`);
   console.log(`    GET /api/read?path=src/config.js`);
   console.log(`    GET /api/list?path=src/core`);
   console.log(`    GET /api/search?q=BM25`);
   console.log(`    GET /api/websearch?q=your+query (Playwright headless Chrome)\n`);
+  console.log(`  Dev control channel (drives the open demo tab):`);
+  console.log(`    POST /api/control/refresh              — reload the UI`);
+  console.log(`    POST /api/control/prompt  {"text":"…"} — send a prompt to Sovereign\n`);
+
+  // Auto-open the demo in the default browser so it's not easy to miss.
+  const openCommand = process.platform === "win32" ? `start "" "${demoUrl}"`
+    : process.platform === "darwin" ? `open "${demoUrl}"`
+    : `xdg-open "${demoUrl}"`;
+
+  exec(openCommand, (err) => {
+    if (err) console.log(`  (Could not auto-open a browser — open ${demoUrl} manually)\n`);
+  });
 });
 
 // Graceful shutdown

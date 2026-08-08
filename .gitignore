@@ -146,6 +146,13 @@ agents/
 .kiro/
 .vscode/
 .opencode/
+.claude/
+
+# Claude working docs — planning notes, not part of the published project
+CLAUDE.md
+ROADMAP.md
+SCRATCHPAD.md
+TASKS.md
 
 # Memory state persistence
 data/
