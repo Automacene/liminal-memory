@@ -1,0 +1,679 @@
+/**
+ * DocGen Extension — Exhaustive codebase documentation generator.
+ *
+ * Single extension that handles the full pipeline:
+ * 1. Walk folder, build tree view (deterministic)
+ * 2. Extract imports, exports, function signatures (deterministic)
+ * 3. Build dependency map including IIFE/global references (deterministic)
+ * 4. Detect external dependencies (CDN, bundles) (deterministic)
+ * 5. For each file: LLM writes summary (no cap, natural stop)
+ * 6. For each function: LLM writes explanation (no cap, natural stop)
+ * 7. Project overview generated last from all summaries
+ * 8. Output appended incrementally to DOCUMENTATION.md
+ *
+ * The system does all structural analysis. The LLM only writes explanations.
+ * Each LLM call is stateless — clean context, no history carried over.
+ * Uses LLMTransport from the library (same as demo chat).
+ */
+import { readFile, readdir, writeFile, appendFile } from "node:fs/promises";
+import { join, extname } from "node:path";
+import { LLMTransport } from "../transport/llm.js";
+
+// === Config ===
+const IGNORES = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', 'target', 'vendor',
+  '.next', '.nuxt', '__pycache__', 'coverage', '.cache',
+  '.vscode', '.idea', '.kiro', '.DS_Store',
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'
+]);
+
+const VALID_EXTS = new Set([
+  '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
+  '.py', '.rs', '.go', '.java', '.c', '.cpp', '.h',
+  '.rb', '.php', '.svelte', '.vue', '.html',
+  '.css', '.scss', '.less',
+  '.md', '.txt', '.rst',
+  '.json', '.yaml', '.yml', '.toml',
+  '.sh', '.bash', '.sql'
+]);
+
+// Patterns to filter from signature extraction
+const SKIP_SIGNATURES = ['setTimeout', 'setInterval', 'requestAnimationFrame', 'addEventListener', 'then', 'catch', 'forEach', 'map', 'filter', 'reduce', 'if', 'for', 'while', 'switch', 'else', 'do', 'try'];
+
+// ============================================================
+// MAIN ENTRY POINT
+// ============================================================
+
+/**
+ * Generate complete documentation for a folder. Writes incrementally.
+ * @param {string} rootDir - absolute path to the folder
+ * @param {string} outputPath - absolute path to write DOCUMENTATION.md
+ * @param {object} opts
+ * @param {object} opts.llmConfig - LLM transport config { endpoint, apiFormat, completionPath, model, thinking }
+ * @param {function} [opts.onProgress] - callback(message) for status updates
+ * @returns {Promise<{filesDocumented: number, totalFunctions: number}>}
+ */
+export async function generateDocumentation(rootDir, outputPath, opts = {}) {
+  const llmConfig = opts.llmConfig || {
+    endpoint: 'http://127.0.0.1:11434',
+    apiFormat: 'ollama',
+    model: 'gemma4-e4b:gpu',
+    thinking: false
+  };
+  const transport = new LLMTransport(llmConfig);
+  const onProgress = opts.onProgress || (() => {});
+  const folderName = rootDir.split(/[/\\]/).pop();
+
+  // === PHASE 1: Structural Analysis (deterministic) ===
+  onProgress('Phase 1: Walking folder structure...');
+  const fileEntries = await listFiles(rootDir);
+  onProgress(`Found ${fileEntries.length} source files`);
+
+  // Detect Tier 2 tooling folders (acknowledge but don't document)
+  const toolingNotes = [];
+  const TIER2_FOLDERS = { '.kiro': 'Kiro AI coding agent', '.opencode': 'OpenCode AI agent', '.vscode': 'VS Code workspace config', '.idea': 'JetBrains IDE config', '.cursor': 'Cursor AI editor', '.devcontainer': 'Dev container config' };
+  let rootEntries;
+  try { rootEntries = await readdir(rootDir); } catch { rootEntries = []; }
+  for (const name of rootEntries) {
+    if (TIER2_FOLDERS[name]) toolingNotes.push(`- **${name}/**: ${TIER2_FOLDERS[name]}`);
+  }
+
+  // Build tree view
+  const treeView = buildTreeView(fileEntries);
+
+  // Analyze each file
+  onProgress('Phase 1: Extracting structure...');
+  const analyzed = [];
+  for (const entry of fileEntries) {
+    try {
+      const code = await readFile(entry.absPath, 'utf8');
+      if (code.length < 20) continue;
+
+      const imports = extractImports(code);
+      const exports = extractExports(code);
+      const signatures = extractSignatures(code);
+
+      analyzed.push({
+        relPath: entry.relPath,
+        absPath: entry.absPath,
+        ext: entry.ext,
+        lineCount: code.split('\n').length,
+        imports,
+        exports,
+        signatures
+      });
+    } catch { /* skip */ }
+  }
+
+  // Build dependency map (ES imports)
+  const depMap = buildDependencyMap(analyzed);
+
+  // Detect IIFE/global implicit dependencies
+  const globalDeps = detectGlobalDependencies(analyzed);
+
+  // Detect external dependencies (CDN scripts, bundles, etc.)
+  const externalDeps = await detectExternalDeps(rootDir);
+
+  const totalFunctions = analyzed.reduce((a, f) => a + f.signatures.length, 0);
+  onProgress(`Analyzed ${analyzed.length} files, ${totalFunctions} functions`);
+
+  // === SCAFFOLD: Write header + tree ===
+  let header = `# Documentation: ${folderName}\n\n`;
+  header += `_Generated by Luminal Memory DocGen_\n\n`;
+  header += `## Project Structure\n\n\`\`\`\n${treeView}\n\`\`\`\n\n`;
+
+  // External dependencies
+  if (externalDeps.length > 0) {
+    header += `## External Dependencies\n\n`;
+    for (const dep of externalDeps) {
+      header += `- ${dep}\n`;
+    }
+    header += '\n';
+  }
+
+  // Tier 2: Development environment acknowledgment
+  if (toolingNotes.length > 0) {
+    header += `## Development Environment\n\n`;
+    for (const note of toolingNotes) {
+      header += note + '\n';
+    }
+    header += '\n';
+  }
+
+  // Table of Contents (nested hierarchical tree, collapsible)
+  header += `## Table of Contents\n\n`;
+  header += buildTocTree(analyzed);
+
+  header += '---\n\n';
+  await writeFile(outputPath, header, 'utf8');
+
+  // === PHASE 2: Per-file documentation (LLM fills, appends per block) ===
+  onProgress('Phase 2: Generating documentation...');
+  const allSummaries = [];
+
+  for (let i = 0; i < analyzed.length; i++) {
+    const file = analyzed[i];
+    const deps = depMap.get(file.relPath) || { importedBy: [], dependsOn: [] };
+    const globals = globalDeps.get(file.relPath) || { uses: [], usedBy: [] };
+    onProgress(`[${i + 1}/${analyzed.length}] ${file.relPath}`);
+
+    // --- File header (append immediately) ---
+    const anchorId = file.relPath.toLowerCase().replace(/[^a-z0-9]/g, '');
+    await appendFile(outputPath, `<a id="${anchorId}"></a>\n<details>\n<summary><strong><code>${file.relPath}</code></strong> — ${file.lineCount} lines, ${file.signatures.length} functions</summary>\n\n## \`${file.relPath}\`\n\n**${file.lineCount} lines** | ${file.signatures.length} functions/classes\n\n`, 'utf8');
+
+    // Read file content on demand
+    let code = '';
+    try { code = await readFile(file.absPath, 'utf8'); } catch { await appendFile(outputPath, '</details>\n\n---\n\n', 'utf8'); continue; }
+
+    // --- File summary (LLM, append immediately) ---
+    onProgress(`[${i + 1}/${analyzed.length}] ${file.relPath} → writing summary`);
+    const summary = await callLLM(transport,
+      'Write a concise but complete summary of this source file. Describe its purpose, what it does, and its role in the project. Do not reproduce code.',
+      code.slice(0, 8000)
+    );
+    if (summary) {
+      await appendFile(outputPath, summary + '\n\n', 'utf8');
+      allSummaries.push({ file: file.relPath, summary });
+    }
+
+    // --- Exports (append immediately) ---
+    if (file.exports.length > 0) {
+      let expBlock = `### Exports\n\n`;
+      for (const exp of file.exports) { expBlock += `- \`${exp.name}\` (${exp.type})\n`; }
+      await appendFile(outputPath, expBlock + '\n', 'utf8');
+    }
+
+    // --- Dependencies (append immediately) ---
+    const hasDeps = deps.dependsOn.length > 0 || deps.importedBy.length > 0 || globals.uses.length > 0 || globals.usedBy.length > 0;
+    if (hasDeps) {
+      let depBlock = `### Dependencies\n\n`;
+      if (deps.dependsOn.length > 0) depBlock += `**Imports from:** ${deps.dependsOn.map(d => '`' + d + '`').join(', ')}\n\n`;
+      if (deps.importedBy.length > 0) depBlock += `**Imported by:** ${deps.importedBy.map(d => '`' + d + '`').join(', ')}\n\n`;
+      if (globals.uses.length > 0) depBlock += `**Uses globals:** ${globals.uses.map(d => '`' + d + '`').join(', ')}\n\n`;
+      if (globals.usedBy.length > 0) depBlock += `**Referenced by:** ${globals.usedBy.map(d => '`' + d + '`').join(', ')}\n\n`;
+      await appendFile(outputPath, depBlock, 'utf8');
+    }
+
+    // --- Functions & Methods (append each one individually) ---
+    const significantSigs = file.signatures.filter(s => s.body && s.body.split('\n').length > 2);
+    if (significantSigs.length > 0) {
+      await appendFile(outputPath, `### Functions & Methods\n\n`, 'utf8');
+
+      for (const sig of significantSigs) {
+        let fnBlock = `#### \`${sig.name}(${sig.params})\` — ${sig.type}, line ${sig.line}\n\n`;
+
+        // LLM explanation using v2 schema
+        if (sig.body.length > 80) {
+          onProgress(`[${i + 1}/${analyzed.length}] ${file.relPath} → ${sig.name}()`);
+          const explanation = await callLLM(transport,
+            `Document this ${sig.type}. Output ONLY in this exact format:\n* **Purpose:** What it does (1 sentence)\n* **Inputs:** List each parameter with inferred type and description\n* **Outputs:** Return type and what it represents\n* **Behavioral Notes:** Edge cases, side effects, or state mutations\n\nIf a field has nothing notable, omit it.`,
+            `File: ${file.relPath}\n\n${sig.body.slice(0, 3000)}`
+          );
+          if (explanation) {
+            fnBlock += explanation + '\n\n';
+          }
+        }
+
+        // Include source code in collapsible
+        fnBlock += `<details>\n<summary>Source</summary>\n\n\`\`\`javascript\n${sig.body}\n\`\`\`\n\n</details>\n\n`;
+
+        // Append this function immediately
+        await appendFile(outputPath, fnBlock, 'utf8');
+      }
+    }
+
+    // --- Close file section ---
+    await appendFile(outputPath, '</details>\n\n---\n\n', 'utf8');
+
+    // Release code reference for GC
+    code = null;
+  }
+
+  // === PHASE 3: Project Overview (generated last, inserted at top) ===
+  onProgress('Phase 3: Writing project overview...');
+  const overviewContext = allSummaries.map(s => `- ${s.file}: ${s.summary.slice(0, 200)}`).join('\n');
+  const overview = await callLLM(transport,
+    'Write a brief project overview (3-5 sentences) explaining what this codebase does, its architecture, and how the components connect. This is the introduction to a technical document.',
+    `Project: ${folderName}\nFile tree:\n${treeView}\n\nFile summaries:\n${overviewContext}`
+  );
+
+  if (overview) {
+    const current = await readFile(outputPath, 'utf8');
+    const insertPoint = current.indexOf('---\n\n') + 5;
+    const updated = current.slice(0, insertPoint) + '\n## Overview\n\n' + overview + '\n\n---\n\n' + current.slice(insertPoint);
+    await writeFile(outputPath, updated, 'utf8');
+  }
+
+  onProgress(`Done — ${analyzed.length} files, ${totalFunctions} functions documented`);
+  return { filesDocumented: analyzed.length, totalFunctions };
+}
+
+// ============================================================
+// LLM CALL (stateless, no cap, uses LLMTransport)
+// ============================================================
+
+async function callLLM(transport, systemPrompt, userContent) {
+  try {
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent }
+    ];
+    const { text } = await transport.complete(messages);
+    return (text || '').trim();
+  } catch (err) {
+    console.log('[DocGen:LLM] Error:', err.message);
+    return '';
+  }
+}
+
+// ============================================================
+// IIFE/GLOBAL DEPENDENCY DETECTION
+// ============================================================
+
+/**
+ * Detect implicit dependencies via global variable references.
+ * Handles patterns like: var Chat = (function(){...})(); then Chat.renderMessage() elsewhere.
+ * @returns {Map<string, {uses: string[], usedBy: string[]}>}
+ */
+function detectGlobalDependencies(analyzedFiles) {
+  const map = new Map();
+  for (const file of analyzedFiles) {
+    map.set(file.relPath, { uses: [], usedBy: [] });
+  }
+
+  // Phase 1: Find all IIFE-defined globals (var X = (function(){...})())
+  const globalDefs = new Map(); // globalName → defining file
+  for (const file of analyzedFiles) {
+    const iifeRe = /(?:var|const|let)\s+(\w+)\s*=\s*\(function\s*\(/g;
+    let m;
+    while ((m = iifeRe.exec(file.code)) !== null) {
+      globalDefs.set(m[1], file.relPath);
+    }
+  }
+
+  // Phase 2: For each file, find references to other files' globals
+  for (const file of analyzedFiles) {
+    for (const [globalName, defFile] of globalDefs) {
+      if (defFile === file.relPath) continue; // Skip self-references
+
+      // Check if this file uses GlobalName.something
+      const useRe = new RegExp('\\b' + globalName + '\\.(\\w+)', 'g');
+      if (useRe.test(file.code)) {
+        const entry = map.get(file.relPath);
+        if (entry && !entry.uses.includes(globalName)) {
+          entry.uses.push(globalName);
+        }
+        const defEntry = map.get(defFile);
+        if (defEntry && !defEntry.usedBy.includes(file.relPath)) {
+          defEntry.usedBy.push(file.relPath);
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+// ============================================================
+// EXTERNAL DEPENDENCY DETECTION
+// ============================================================
+
+/**
+ * Detect external dependencies by scanning for:
+ * - CDN script tags in HTML files
+ * - UMD/bundle script references
+ * - External package imports (not starting with ./ or ../)
+ */
+async function detectExternalDeps(rootDir) {
+  const deps = new Set();
+
+  // Scan for HTML files that might have script/link tags
+  const htmlFiles = [];
+  await walkDir(rootDir, '', htmlFiles, new Set(['.html', '.htm']));
+
+  for (const file of htmlFiles) {
+    try {
+      const html = await readFile(file.absPath, 'utf8');
+
+      // CDN script tags
+      const scriptRe = /<script[^>]+src=["']([^"']+)["']/g;
+      let m;
+      while ((m = scriptRe.exec(html)) !== null) {
+        const src = m[1];
+        if (src.startsWith('http') || src.startsWith('//')) {
+          deps.add(`CDN: ${src}`);
+        } else if (src.includes('dist/') || src.includes('vendor/') || src.includes('.min.')) {
+          deps.add(`Bundle: ${src}`);
+        }
+      }
+
+      // CDN link tags (CSS)
+      const linkRe = /<link[^>]+href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/g;
+      while ((m = linkRe.exec(html)) !== null) {
+        if (m[1].startsWith('http') || m[1].startsWith('//')) {
+          deps.add(`CDN CSS: ${m[1]}`);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // Scan JS files for external package imports (not relative)
+  const jsFiles = [];
+  await walkDir(rootDir, '', jsFiles);
+  for (const file of jsFiles) {
+    try {
+      const code = await readFile(file.absPath, 'utf8');
+      const importRe = /(?:import|require)\s*\(?['"]([^'"./][^'"]*)['"]\)?/g;
+      let m;
+      while ((m = importRe.exec(code)) !== null) {
+        const pkg = m[1].split('/')[0]; // Get package name (handle @scoped/pkg)
+        if (m[1].startsWith('@')) {
+          deps.add(`Package: ${m[1].split('/').slice(0, 2).join('/')}`);
+        } else {
+          deps.add(`Package: ${pkg}`);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  return Array.from(deps).sort();
+}
+
+// ============================================================
+// TREE VIEW BUILDER
+// ============================================================
+
+/**
+ * Build a nested hierarchical TOC as an indented bullet list.
+ */
+function buildTocTree(analyzed) {
+  // Build nested object: { dirs: { name: subtree }, files: [file, ...] }
+  const root = { dirs: {}, files: [] };
+  for (const file of analyzed) {
+    const parts = file.relPath.split('/');
+    let current = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!current.dirs[parts[i]]) current.dirs[parts[i]] = { dirs: {}, files: [] };
+      current = current.dirs[parts[i]];
+    }
+    current.files.push(file);
+  }
+
+  function renderNode(node, depth = 0) {
+    let out = '';
+    const indent = '  '.repeat(depth);
+
+    // Files first
+    for (const file of node.files) {
+      const slug = file.relPath.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const fname = file.relPath.split('/').pop();
+      out += `${indent}- [\`${fname}\`](#${slug}) — ${file.lineCount} lines\n`;
+    }
+
+    // Then subdirectories
+    const dirs = Object.keys(node.dirs).sort();
+    for (const dir of dirs) {
+      out += `${indent}- **${dir}/**\n`;
+      out += renderNode(node.dirs[dir], depth + 1);
+    }
+
+    return out;
+  }
+
+  return renderNode(root, 0) + '\n';
+}
+
+function buildTreeView(files) {
+  // Build a nested object from flat file paths
+  const root = {};
+  for (const file of files) {
+    const parts = file.relPath.split('/');
+    let current = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (i === parts.length - 1) {
+        // File
+        current[part] = null;
+      } else {
+        // Directory
+        if (!current[part]) current[part] = {};
+        current = current[part];
+      }
+    }
+  }
+
+  // Render tree with box-drawing characters
+  function renderTree(node, prefix = '', isLast = true) {
+    const entries = Object.keys(node).sort((a, b) => {
+      // Directories first, then files
+      const aIsDir = node[a] !== null;
+      const bIsDir = node[b] !== null;
+      if (aIsDir && !bIsDir) return -1;
+      if (!aIsDir && bIsDir) return 1;
+      return a.localeCompare(b);
+    });
+
+    let result = '';
+    for (let i = 0; i < entries.length; i++) {
+      const name = entries[i];
+      const isLastEntry = i === entries.length - 1;
+      const connector = isLastEntry ? '└── ' : '├── ';
+      const childPrefix = isLastEntry ? '    ' : '│   ';
+
+      if (node[name] === null) {
+        // File
+        result += prefix + connector + name + '\n';
+      } else {
+        // Directory
+        result += prefix + connector + name + '/\n';
+        result += renderTree(node[name], prefix + childPrefix, isLastEntry);
+      }
+    }
+    return result;
+  }
+
+  const folderName = files.length > 0 ? files[0].relPath.split('/')[0] : '';
+  return renderTree(root);
+}
+
+// ============================================================
+// FILE LISTING
+// ============================================================
+
+async function listFiles(rootDir) {
+  const files = [];
+  await walkDir(rootDir, '', files);
+  return files;
+}
+
+async function walkDir(dir, relPath, files, validExtsOverride = null) {
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); }
+  catch { return; }
+
+  const exts = validExtsOverride || VALID_EXTS;
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || IGNORES.has(entry.name)) continue;
+    const fullPath = join(dir, entry.name);
+    const rel = relPath ? relPath + '/' + entry.name : entry.name;
+
+    if (entry.isDirectory()) {
+      await walkDir(fullPath, rel, files, validExtsOverride);
+    } else {
+      const ext = extname(entry.name).toLowerCase();
+      if (!exts.has(ext)) continue;
+      files.push({ relPath: rel, absPath: fullPath, ext });
+    }
+  }
+}
+
+// ============================================================
+// IMPORT/EXPORT EXTRACTION
+// ============================================================
+
+function extractImports(code) {
+  const imports = [];
+  let m;
+
+  const esRe = /import\s+(?:\{([^}]*)\}|(\w+))\s+from\s+['"]([^'"]+)['"]/g;
+  while ((m = esRe.exec(code)) !== null) {
+    const names = m[1] ? m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0]) : [m[2]];
+    imports.push({ source: m[3], names: names.filter(Boolean) });
+  }
+
+  const starRe = /import\s+\*\s+as\s+(\w+)\s+from\s+['"]([^'"]+)['"]/g;
+  while ((m = starRe.exec(code)) !== null) {
+    imports.push({ source: m[2], names: ['* as ' + m[1]] });
+  }
+
+  const cjsRe = /(?:const|let|var)\s+(?:\{([^}]*)\}|(\w+))\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  while ((m = cjsRe.exec(code)) !== null) {
+    const names = m[1] ? m[1].split(',').map(s => s.trim()) : [m[2]];
+    imports.push({ source: m[3], names: names.filter(Boolean) });
+  }
+
+  return imports;
+}
+
+function extractExports(code) {
+  const exports = [];
+  let m;
+
+  const fnRe = /export\s+(?:async\s+)?function\s+(\w+)/g;
+  while ((m = fnRe.exec(code)) !== null) exports.push({ name: m[1], type: 'function' });
+
+  const classRe = /export\s+class\s+(\w+)/g;
+  while ((m = classRe.exec(code)) !== null) exports.push({ name: m[1], type: 'class' });
+
+  const constRe = /export\s+(?:const|let|var)\s+(\w+)/g;
+  while ((m = constRe.exec(code)) !== null) exports.push({ name: m[1], type: 'const' });
+
+  const defaultRe = /export\s+default\s+(?:function\s+)?(\w+)?/g;
+  while ((m = defaultRe.exec(code)) !== null) exports.push({ name: m[1] || 'default', type: 'default' });
+
+  const namedRe = /export\s+\{([^}]+)\}/g;
+  while ((m = namedRe.exec(code)) !== null) {
+    m[1].split(',').forEach(s => {
+      const name = s.trim().split(/\s+as\s+/)[0];
+      if (name) exports.push({ name, type: 'const' });
+    });
+  }
+
+  return exports;
+}
+
+// ============================================================
+// FUNCTION SIGNATURE EXTRACTION
+// ============================================================
+
+function extractSignatures(code) {
+  const sigs = [];
+  const lines = code.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let m;
+
+    // function name(params) or async function name(params)
+    m = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)/);
+    if (m && !shouldSkip(m[1])) {
+      sigs.push({ name: m[1], type: 'function', params: m[2].trim(), line: i + 1, body: extractBody(lines, i) });
+      continue;
+    }
+
+    // const name = (params) => or const name = function(params)
+    m = line.match(/(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\(([^)]*)\)\s*=>|function\s*\(([^)]*)\))/);
+    if (m && !shouldSkip(m[1])) {
+      sigs.push({ name: m[1], type: 'function', params: (m[2] || m[3] || '').trim(), line: i + 1, body: extractBody(lines, i) });
+      continue;
+    }
+
+    // class Name
+    m = line.match(/(?:export\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?/);
+    if (m) {
+      sigs.push({ name: m[1], type: 'class', params: m[2] ? 'extends ' + m[2] : '', line: i + 1, body: extractBody(lines, i) });
+      continue;
+    }
+
+    // Method: name(params) { (indented, inside class/object)
+    m = line.match(/^\s{2,}(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*\{/);
+    if (m && !shouldSkip(m[1])) {
+      sigs.push({ name: m[1], type: 'method', params: m[2].trim(), line: i + 1, body: extractBody(lines, i) });
+    }
+  }
+
+  return sigs;
+}
+
+function shouldSkip(name) {
+  return SKIP_SIGNATURES.includes(name);
+}
+
+function extractBody(lines, startLine) {
+  let depth = 0;
+  let started = false;
+  const body = [];
+
+  for (let i = startLine; i < Math.min(lines.length, startLine + 60); i++) {
+    for (const ch of lines[i]) {
+      if (ch === '{') { depth++; started = true; }
+      if (ch === '}') depth--;
+    }
+    body.push(lines[i]);
+    if (started && depth === 0) break;
+    if (body.length >= 40) { body.push('  // ... (truncated)'); break; }
+  }
+
+  return body.join('\n');
+}
+
+// ============================================================
+// DEPENDENCY MAP
+// ============================================================
+
+function buildDependencyMap(analyzedFiles) {
+  const map = new Map();
+  for (const file of analyzedFiles) {
+    map.set(file.relPath, { importedBy: [], dependsOn: [] });
+  }
+
+  for (const file of analyzedFiles) {
+    for (const imp of file.imports) {
+      if (!imp.source.startsWith('.')) continue;
+      const dir = file.relPath.includes('/') ? file.relPath.replace(/\/[^/]+$/, '') : '';
+      const resolved = resolveRelative(dir, imp.source);
+      const match = findFile(analyzedFiles, resolved);
+      if (match) {
+        const entry = map.get(file.relPath);
+        if (entry && !entry.dependsOn.includes(match)) entry.dependsOn.push(match);
+        const target = map.get(match);
+        if (target && !target.importedBy.includes(file.relPath)) target.importedBy.push(file.relPath);
+      }
+    }
+  }
+
+  return map;
+}
+
+function resolveRelative(fromDir, importPath) {
+  const parts = fromDir ? fromDir.split('/') : [];
+  for (const p of importPath.split('/')) {
+    if (p === '.') continue;
+    if (p === '..') parts.pop();
+    else parts.push(p);
+  }
+  return parts.join('/');
+}
+
+function findFile(files, resolved) {
+  if (files.find(f => f.relPath === resolved)) return resolved;
+  const exts = ['.js', '.ts', '.jsx', '.tsx', '.mjs'];
+  for (const ext of exts) {
+    if (files.find(f => f.relPath === resolved + ext)) return resolved + ext;
+  }
+  for (const ext of exts) {
+    if (files.find(f => f.relPath === resolved + '/index' + ext)) return resolved + '/index' + ext;
+  }
+  return null;
+}
