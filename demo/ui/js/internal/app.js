@@ -47,7 +47,7 @@
       await fetch('/api/state/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state)
+        body: JSON.stringify(state, null, 2)
       });
       console.log('[AutoSave] Saved (' + memory.chain.length + ' nodes)');
     } catch (e) {
@@ -285,7 +285,7 @@
         fetch('/api/settings/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(allSettings)
+          body: JSON.stringify(allSettings, null, 2)
         }).catch(function () {});
       }, 500);
     });
@@ -410,11 +410,53 @@
       var windowNodes = memory.getWindow();
       var windowIds = new Set(windowNodes.map(function (n) { return n.id; }));
       var searchResults = memory.bm25.search(msg, 10);
-      var recallNodes = searchResults
+      var recallNodeIds = searchResults
         .filter(function (r) { return !windowIds.has(r.nodeId); })
         .slice(0, memory.config.maxRetrievedNodes)
-        .map(function (r) { return memory.chain.get(r.nodeId); })
+        .map(function (r) { return r.nodeId; });
+
+      // Link expansion: follow edges up to N hops to find additional related nodes
+      var linkDistance = memory.config.linkDistance || 1;
+      if (linkDistance > 0 && recallNodeIds.length > 0) {
+        var expanded = new Set(recallNodeIds);
+        var frontier = recallNodeIds.slice();
+        for (var hop = 0; hop < linkDistance; hop++) {
+          var nextFrontier = [];
+          for (var fi = 0; fi < frontier.length; fi++) {
+            var fNode = memory.chain.get(frontier[fi]);
+            if (fNode && fNode.graph) {
+              // Follow both edge directions for discovery
+              var allEdges = (fNode.graph.edges_to || []).concat(fNode.graph.edges_from || []);
+              for (var li = 0; li < allEdges.length; li++) {
+                var linkedId = allEdges[li];
+                if (!expanded.has(linkedId) && !windowIds.has(linkedId)) {
+                  expanded.add(linkedId);
+                  nextFrontier.push(linkedId);
+                }
+              }
+            }
+          }
+          frontier = nextFrontier;
+        }
+        var expandedCount = expanded.size - recallNodeIds.length;
+        if (expandedCount > 0) {
+          console.log('[Graph:Expand] BM25 found ' + recallNodeIds.length + ' → expanded to ' + expanded.size + ' via ' + linkDistance + '-hop traversal (+' + expandedCount + ' linked nodes)');
+        }
+        // Add expanded nodes (cap total)
+        recallNodeIds = Array.from(expanded).slice(0, memory.config.maxRetrievedNodes * 2);
+      }
+
+      var recallNodes = recallNodeIds
+        .map(function (id) { return memory.chain.get(id); })
         .filter(Boolean);
+
+      // Create directional edges: current turn → recalled nodes
+      for (var rli = 0; rli < recallNodes.length; rli++) {
+        memory.chain.link(pendingNode.id, recallNodes[rli].id);
+      }
+      if (recallNodes.length > 0) {
+        console.log('[Graph] Node ' + pendingNode.id + ' edges_to ' + recallNodes.length + ' recalled nodes');
+      }
 
       if (recallNodes.length > 0) {
         Chat.renderRecall(recallNodes.length);
