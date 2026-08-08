@@ -18,31 +18,68 @@ export class Retrieval {
 
   /**
    * Full retrieval pipeline. Returns historical nodes to inject into the prompt.
-   * For simple queries: returns nodes for injection.
-   * For complex queries: returns null (deep retrieval handles the full response).
-   * 
+   *
+   * Order of operations:
+   * 1. Active-memory recall — BM25 search over everything still in RAM (not archived),
+   *    excluding whatever's already in the sliding window. If graph edges exist on the
+   *    matched nodes, follow them outward up to `linkDistance` hops to pull in related
+   *    nodes a plain keyword match would've missed. If a `currentNodeId` is provided,
+   *    directional edges are created from that node to whatever gets recalled — this is
+   *    how the graph grows through use instead of being pre-built.
+   * 2. Only if active memory has nothing useful does this fall back to archives — bloom
+   *    filter gate, TF-IDF block ranking, decompress, search within.
+   *
    * @param {string} query - the user's message
    * @param {object[]} windowNodes - current sliding window nodes
+   * @param {number} [currentNodeId] - id of the node this turn should link FROM, if any
    * @returns {{ nodes: object[], deepResponse: string|null }}
    */
-  async retrieve(query, windowNodes) {
-    const { retrievalThreshold, maxRetrievedNodes } = this.config;
+  async retrieve(query, windowNodes, currentNodeId = null) {
+    const { retrievalThreshold, maxRetrievedNodes, linkDistance } = this.config;
+    const windowIds = new Set(windowNodes.map(n => n.id));
 
-    // Step 1: Check BM25 confidence on active window
+    // Step 1: Active-memory recall (live BM25 + graph link expansion).
+    // One BM25 pass gives BOTH the top seed matches AND a relevance score for every
+    // node that shares any query term — the score map is reused below to rank the
+    // graph-expanded candidates, so we keep the *best*-matching nodes, not just the
+    // first ones the graph walk happened to reach.
+    const scored = this.bm25.search(query, Number.MAX_SAFE_INTEGER);
+    const scoreById = new Map(scored.map(r => [r.nodeId, r.score]));
+
+    let recallNodeIds = scored
+      .filter(r => !windowIds.has(r.nodeId))
+      .slice(0, maxRetrievedNodes)
+      .map(r => r.nodeId);
+
+    if ((linkDistance || 0) > 0 && recallNodeIds.length > 0) {
+      recallNodeIds = this._expandAndRank(recallNodeIds, windowIds, linkDistance, maxRetrievedNodes, scoreById);
+    }
+
+    const activeNodes = recallNodeIds.map(id => this.chain.get(id)).filter(Boolean);
+
+    if (activeNodes.length > 0) {
+      if (currentNodeId != null) {
+        for (const node of activeNodes) {
+          this.chain.link(currentNodeId, node.id);
+        }
+        console.log(`[Graph] Node ${currentNodeId} edges_to ${activeNodes.length} recalled nodes`);
+      }
+      return { nodes: activeNodes, deepResponse: null };
+    }
+
+    // Step 2: Nothing relevant in active memory — check confidence before digging into archives
     const windowScore = this.bm25.bestScore(query);
-
-    // If active window has a strong match, no need to dig into archives
     if (windowScore >= retrievalThreshold) {
       return { nodes: [], deepResponse: null };
     }
 
-    // Step 2: Check if any archived blocks might contain relevant terms
+    // Step 3: Check if any archived blocks might contain relevant terms
     if (!this.bloom.testQuery(query)) {
       // Bloom filter says definitely not in any archive
       return { nodes: [], deepResponse: null };
     }
 
-    // Step 3: Rank archive blocks by TF-IDF cosine similarity
+    // Step 4: Rank archive blocks by TF-IDF cosine similarity
     const blockVectors = this.compaction.getBlockVectors();
     if (blockVectors.length === 0) return { nodes: [], deepResponse: null };
 
@@ -54,7 +91,7 @@ export class Retrieval {
     // Filter to blocks with non-zero scores
     const relevantBlocks = ranked.filter(r => r.score > 0);
 
-    // Step 4: Simple retrieval — decompress top candidates and search within
+    // Step 5: Simple retrieval — decompress top candidates and search within
     const results = [];
     const maxBlocks = Math.min(2, relevantBlocks.length);
 
@@ -70,6 +107,65 @@ export class Retrieval {
     }
 
     return { nodes: results.slice(0, maxRetrievedNodes), deepResponse: null };
+  }
+
+  /**
+   * Follow graph edges outward from the BM25-matched seed nodes (up to `linkDistance`
+   * hops), then rank the ENTIRE candidate set — seeds plus everything the walk pulled
+   * in — by BM25 relevance to the query, and keep the best `maxRetrievedNodes * 2`.
+   *
+   * Why the ranking matters: graph-expanded nodes arrive unscored — they were pulled in
+   * for being *connected*, not for matching the query. Without ranking, trimming to the
+   * cap just keeps whatever the walk reached first (seeds, then nearest neighbors),
+   * silently dropping genuinely better matches sitting deeper in the set. Scoring every
+   * candidate against the query and keeping the top N means the kept set is the best
+   * matches; hop distance (closer first) is the tie-breaker for candidates that share
+   * no query terms and would otherwise all score 0.
+   *
+   * @param {number[]} seedIds - initial BM25 match IDs (already the top matches)
+   * @param {Set<number>} windowIds - ids already in the sliding window (skip these)
+   * @param {number} linkDistance - how many hops to follow
+   * @param {number} maxRetrievedNodes - kept set is capped at 2x this
+   * @param {Map<number, number>} scoreById - BM25 score per node id, from the query pass
+   * @returns {number[]} candidate ids ranked best-first, capped
+   */
+  _expandAndRank(seedIds, windowIds, linkDistance, maxRetrievedNodes, scoreById) {
+    // BFS outward, recording each candidate's hop distance from the seeds (seeds = 0).
+    const hopById = new Map(seedIds.map(id => [id, 0]));
+    let frontier = seedIds.slice();
+
+    for (let hop = 1; hop <= linkDistance; hop++) {
+      const nextFrontier = [];
+      for (const id of frontier) {
+        const node = this.chain.get(id);
+        if (!node || !node.graph) continue;
+        const allEdges = (node.graph.edges_to || []).concat(node.graph.edges_from || []);
+        for (const linkedId of allEdges) {
+          if (!hopById.has(linkedId) && !windowIds.has(linkedId)) {
+            hopById.set(linkedId, hop);
+            nextFrontier.push(linkedId);
+          }
+        }
+      }
+      frontier = nextFrontier;
+    }
+
+    // Rank the whole candidate set by query relevance; tie-break by proximity (hop).
+    const ranked = Array.from(hopById.keys())
+      .sort((a, b) => {
+        const scoreDiff = (scoreById.get(b) || 0) - (scoreById.get(a) || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        return hopById.get(a) - hopById.get(b);
+      })
+      .slice(0, maxRetrievedNodes * 2);
+
+    if (hopById.size > seedIds.length) {
+      console.log(
+        `[Graph:Expand] BM25 found ${seedIds.length} → ${hopById.size} candidates ` +
+        `via ${linkDistance}-hop traversal → kept best ${ranked.length} by relevance`
+      );
+    }
+    return ranked;
   }
 
   /**
