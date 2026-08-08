@@ -111,9 +111,11 @@ export class LuminalMemory {
       }
     }
 
-    // 4. Retrieve relevant historical nodes (pure math — BM25 + bloom + TF-IDF)
+    // 4. Retrieve relevant historical nodes (pure math — BM25 + graph + bloom + TF-IDF)
+    // Passing userNode.id lets retrieval create graph edges from this turn to whatever
+    // gets recalled, so the graph builds itself through use (see ROADMAP.md Phase 1/3).
     const { nodes: retrievedNodes } = await this.retrieval.retrieve(
-      message, this.window.select(this.chain)
+      message, this.window.select(this.chain), userNode.id
     );
 
     // 5. Build prompt with tool results + recall + sliding window
