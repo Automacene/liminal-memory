@@ -20,10 +20,13 @@ export class BM25 {
 
   /**
    * Add a node to the index.
+   * Uses node.keywords array if available, falls back to tokenizing content.
    * @param {object} node
    */
   add(node) {
-    const terms = tokenize(node.content);
+    const terms = (node.keywords && node.keywords.length > 0)
+      ? node.keywords
+      : tokenize(node.content);
     const termFreqs = countTerms(terms);
 
     this.docLengths.set(node.id, terms.length);
@@ -63,12 +66,13 @@ export class BM25 {
 
   /**
    * Search for the most relevant nodes given a query.
+   * Extracts keywords from query (stopwords stripped), matches against indexed keywords.
    * @param {string} query
    * @param {number} topK - max results to return
    * @returns {{ nodeId: number, score: number }[]}
    */
   search(query, topK = 10) {
-    const queryTerms = tokenize(query);
+    const queryTerms = extractQueryKeywords(query);
     if (queryTerms.length === 0) return [];
 
     const avgdl = this.docCount > 0 ? this.totalLength / this.docCount : 1;
@@ -159,6 +163,23 @@ export function tokenize(text) {
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
     .filter(t => t.length > 0);
+}
+
+const STOPWORDS = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','might','shall','can','may','must','need','this','that','these','those','which','what','who','whom','where','when','why','how','not','no','nor','but','and','or','if','then','else','than','too','very','just','about','all','also','any','because','before','between','both','by','each','few','for','from','further','here','in','into','its','more','most','of','on','once','only','other','out','over','own','same','so','some','such','their','them','there','through','to','under','until','up','us','we','with','you','your','our','it','they','he','she','him','her','his','my','me','i','am','at','as','please','tell','explain','can','want','know','like','think','get','make','use','let','say','see']);
+
+/**
+ * Extract keywords from a query string — same filtering as node keyword extraction.
+ * Stopwords removed, 3+ char terms only.
+ * @param {string} query
+ * @returns {string[]}
+ */
+function extractQueryKeywords(query) {
+  if (!query) return [];
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !STOPWORDS.has(t));
 }
 
 /**
