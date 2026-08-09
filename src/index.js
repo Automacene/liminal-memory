@@ -274,6 +274,7 @@ export class LuminalMemory {
 
       return null;
     } catch (err) {
+      // A tool-routing hiccup shouldn't crash the chat — degrade to "no tool this turn".
       console.warn("[Chat] Tool decision failed:", err.message);
       return null;
     }
