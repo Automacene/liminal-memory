@@ -38,6 +38,9 @@ export class LuminalMemory {
     this.memoryManager = new MemoryManager(this.chain, this.config);
     // Model transport: must implement complete(messages) and generateSummary(nodes).
     this.transport = userConfig.transport || new LLMTransport(this.config);
+    // Summarizer: writes the summary for an archived block. Must implement generateSummary(nodes).
+    // Defaults to the transport, so swapping the model swaps summaries too — unless overridden here.
+    this.summarizer = userConfig.summarizer || this.transport;
     this.compaction = new Compaction(
       this.chain, this.bm25, this.bloom, this.tfidf, this.archive, this.config
     );
@@ -350,7 +353,7 @@ export class LuminalMemory {
 
     if (!summary) {
       const nodes = this.chain.range(from, to);
-      summary = await this.transport.generateSummary(nodes);
+      summary = await this.summarizer.generateSummary(nodes);
     }
 
     return this.compaction.trim(from, to, summary);
@@ -370,7 +373,7 @@ export class LuminalMemory {
       const ids = new Set(nodeIds);
       const nodes = this.chain.all().filter(n => ids.has(n.id) && n.role !== "compaction");
       if (nodes.length > 0) {
-        summary = await this.transport.generateSummary(nodes);
+        summary = await this.summarizer.generateSummary(nodes);
       }
     }
 
@@ -414,7 +417,7 @@ export class LuminalMemory {
       const windowIds = new Set(windowNodes.map(n => n.id));
       const nodesToTrim = allNodes.filter(n => !windowIds.has(n.id));
       if (nodesToTrim.length > 0) {
-        summary = await this.transport.generateSummary(nodesToTrim);
+        summary = await this.summarizer.generateSummary(nodesToTrim);
       }
     }
 
@@ -441,7 +444,7 @@ export class LuminalMemory {
     if (!summary) {
       const allNodes = this.chain.all();
       if (allNodes.length > 0) {
-        summary = await this.transport.generateSummary(allNodes.slice(-50));
+        summary = await this.summarizer.generateSummary(allNodes.slice(-50));
       }
     }
 
