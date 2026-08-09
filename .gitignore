@@ -159,6 +159,9 @@ MERGE-CHECK.md
 
 # Local demo / test harness — kept locally, not part of the published library
 demo/
+serve.js
+ingest-docs.js
+tmp/
 
 # Memory state persistence
 data/
