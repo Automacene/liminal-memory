@@ -39,6 +39,34 @@ describe("Extensibility — pluggable connection points", () => {
     });
   });
 
+  describe("summarizer", () => {
+    it("defaults to the transport when none is supplied", () => {
+      const mem = new LuminalMemory();
+      assert.strictEqual(mem.summarizer, mem.transport, "summaries ride on the transport by default");
+    });
+
+    it("uses a supplied summarizer to write archive summaries", async () => {
+      let called = false;
+      const mem = new LuminalMemory({
+        storageAdapter: { async init() {}, async store() {}, async retrieve() { return []; }, async delete() {} },
+        summarizer: {
+          async generateSummary(nodes) {
+            called = true;
+            return { startTopic: "custom summary", keyDecisions: [], openThreads: [] };
+          }
+        }
+      });
+
+      mem.chain.append("user", "alpha");
+      mem.chain.append("assistant", "beta");
+      // Public trim with no summary → the library must auto-generate via OUR summarizer.
+      const marker = await mem.trim({ from: 1, to: 2 });
+
+      assert.ok(called, "injected summarizer was called");
+      assert.strictEqual(marker.metadata.summary.startTopic, "custom summary", "its summary was used");
+    });
+  });
+
   describe("model transport", () => {
     it("defaults to the built-in LLMTransport when none is supplied", () => {
       const mem = new LuminalMemory();
