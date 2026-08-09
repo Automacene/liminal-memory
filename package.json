@@ -1,16 +1,16 @@
 {
-  "name": "@automacene/luminal-memory",
+  "name": "@automacene/liminal-memory",
   "version": "1.0.0",
   "description": "Zero-dependency infinite context memory for any LLM. Runs in browser and Node.js.",
-  "main": "dist/luminal-memory.umd.js",
+  "main": "dist/liminal-memory.umd.js",
   "module": "src/index.js",
-  "browser": "dist/luminal-memory.umd.js",
+  "browser": "dist/liminal-memory.umd.js",
   "type": "module",
   "exports": {
     ".": {
       "import": "./src/index.js",
-      "require": "./dist/luminal-memory.umd.js",
-      "browser": "./dist/luminal-memory.umd.js"
+      "require": "./dist/liminal-memory.umd.js",
+      "browser": "./dist/liminal-memory.umd.js"
     }
   },
   "sideEffects": false,
@@ -19,10 +19,10 @@
     "src/"
   ],
   "scripts": {
-    "build": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.min.js --format=esm",
-    "build:umd": "esbuild src/index.js --bundle --minify --outfile=dist/luminal-memory.umd.js --format=iife --global-name=LuminalMemory",
+    "build": "esbuild src/index.js --bundle --minify --outfile=dist/liminal-memory.min.js --format=esm",
+    "build:umd": "esbuild src/index.js --bundle --minify --outfile=dist/liminal-memory.umd.js --format=iife --global-name=LiminalMemory",
     "test": "node --test tests/*.test.js",
-    "dev": "esbuild src/index.js --bundle --outfile=dist/luminal-memory.js --format=esm --watch",
+    "dev": "esbuild src/index.js --bundle --outfile=dist/liminal-memory.js --format=esm --watch",
     "demo": "npm run build:umd && node serve.js"
   },
   "keywords": [
