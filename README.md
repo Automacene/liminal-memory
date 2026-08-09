@@ -1,4 +1,7 @@
-# Liminal Memory
+<p align="center">
+  <img src="assets/banner.svg" alt="Liminal Memory" width="100%">
+</p>
+
 [![GitHub Repo stars](https://img.shields.io/github/stars/Automacene/liminal-memory?style=flat&color=gold)](https://github.com/Automacene/liminal-memory)
 [![GitHub forks](https://img.shields.io/github/forks/Automacene/liminal-memory?style=flat&color=blue)](https://github.com/Automacene/liminal-memory)
 [![license](https://img.shields.io/badge/license-Apache%202.0-green)](./LICENSE)
