@@ -59,11 +59,6 @@ export class LLMTransport {
     let content = data.choices?.[0]?.message?.content || "";
     let reasoning = data.choices?.[0]?.message?.reasoning_content || "";
 
-    // Log reasoning if present (Gemma 4 format)
-    if (reasoning) {
-      console.log(`[LLM:think] ${reasoning.slice(0, 300)}`);
-    }
-
     // Strip inline thinking tags if present (various model formats)
     content = content.replace(/<\|channel>thought<channel\|>[\s\S]*?<\|channel>response<channel\|>/g, '').trim();
     content = content.replace(/<\|?think\|?>[\s\S]*?<\|?\/?think\|?>/g, '').trim();

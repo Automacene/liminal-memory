@@ -74,11 +74,6 @@ export function maybeSplit(chain, hub) {
         { categoryId: catB.id, memberIds: groupB.map(m => m.id) }
       );
     }
-
-    console.log(
-      `[Split] Node ${hub.id} overflowed (${members.length} children) → ` +
-      `"${catA.content}" (${groupA.length}) + "${catB.content}" (${groupB.length})`
-    );
   } finally {
     chain._splitting = false;
   }

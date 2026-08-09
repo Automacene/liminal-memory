@@ -12,8 +12,6 @@ export class ToolRegistry {
     this.tools = new Map();         // name → Tool instance
     this.bm25 = new BM25(config.bm25 || { k1: 1.2, b: 0.4 });
     this.matchThreshold = config.toolMatchThreshold || 0.3;
-
-    console.log("[ToolRegistry] Initialized | threshold:", this.matchThreshold);
   }
 
   /**
@@ -33,8 +31,6 @@ export class ToolRegistry {
       this.bm25.add(tool.toNode());
     }
     tool._registered = true;
-
-    console.log(`[ToolRegistry] Registered "${tool.name}" (discovery: ${tool.discovery}) | total tools: ${this.tools.size}`);
   }
 
   /**
@@ -47,10 +43,7 @@ export class ToolRegistry {
     if (this.tools.size === 0) return [];
 
     const results = this.bm25.search(query, 5);
-    if (results.length === 0) {
-      console.log(`[ToolRegistry] No tools matched for: "${query.slice(0, 50)}"`);
-      return [];
-    }
+    if (results.length === 0) return [];
 
     // Normalize scores to 0-1 range (linear)
     const maxScore = results[0].score;
@@ -67,12 +60,7 @@ export class ToolRegistry {
 
       if (tool && tool.discovery !== 'llm') {
         matched.push({ tool, score: normalized });
-        console.log(`[ToolRegistry] Match: "${tool.name}" score=${normalized.toFixed(3)} (raw: ${r.score.toFixed(3)}) for query: "${query.slice(0, 50)}"`);
       }
-    }
-
-    if (matched.length === 0) {
-      console.log(`[ToolRegistry] No tools above threshold ${this.matchThreshold} for: "${query.slice(0, 50)}" (best raw: ${maxScore.toFixed(3)})`);
     }
 
     return matched;
