@@ -261,8 +261,7 @@ async function callLLM(transport, systemPrompt, userContent) {
     const { text } = await transport.complete(messages);
     return (text || '').trim();
   } catch (err) {
-    console.log('[DocGen:LLM] Error:', err.message);
-    return '';
+    return ''; // fall back to no LLM-generated text for this section
   }
 }
 

@@ -10,17 +10,49 @@
 
   // === Config ===
   var CONFIG = {
-    endpoint: 'http://127.0.0.1:8081',
-    apiFormat: 'openai',
+    endpoint: 'http://127.0.0.1:11434',
+    apiFormat: 'ollama',
     completionPath: '/v1/chat/completions',
-    model: 'gemma-4-26B-A4B-it',
+    model: 'gemma4-e4b:gpu',
     thinking: false,
     maxRetrievedNodes: 6,
     recallBufferRatio: 0.2,
     retrievalThreshold: 0.2,
     toolMatchThreshold: 0.5,
-    webSearchEnabled: false
+    webSearchEnabled: false,
+    // DOGFOOD: we (the demo) plug our own NLP namer into the library's node-naming socket,
+    // exactly like an outside developer would. The library keeps its instant keyword names;
+    // this upgrades them to nice topic labels off the hot path (via enrichCategoryNames below).
+    nodeNamer: nlpNameCluster
   };
+
+  /**
+   * NLP cluster namer plugged into the library's nodeNamer socket. Given the member nodes of a
+   * freshly-split category, ask the local model for a short topic label. Runs OFF the hot path
+   * (the library only calls this from enrichCategoryNames, never during a split). Returns
+   * { label } or null to leave the instant keyword name in place.
+   */
+  async function nlpNameCluster(memberNodes) {
+    try {
+      var snippets = memberNodes
+        .map(function (n) { return (n.content || '').replace(/\s+/g, ' ').slice(0, 200); })
+        .filter(Boolean).join('\n---\n');
+      if (!snippets) return null;
+      // Reuse the library's own transport, so the namer speaks whatever backend the demo is
+      // configured for (ollama/openai/custom) without duplicating any of that logic.
+      var out = await memory.transport.complete([
+        { role: 'system', content: 'You name topic clusters. Given a few related snippets, reply with ONLY a short 1-3 word topic label. No punctuation, no quotes, no explanation.' },
+        { role: 'user', content: snippets }
+      ]);
+      var label = ((out && out.text) || '').split('\n')[0].replace(/["'.:]/g, '').trim().slice(0, 40);
+      if (!label) return null;
+      console.log('[NodeNamer] NLP named a ' + memberNodes.length + '-node cluster: "' + label + '"');
+      return { label: label };
+    } catch (e) {
+      console.warn('[NodeNamer] NLP naming failed:', e.message);
+      return null;
+    }
+  }
 
   // === State ===
   var memory = new LuminalMemory.LuminalMemory(CONFIG);
@@ -524,6 +556,16 @@
     Input.enable();
     refreshStats();
     autoSave();
+
+    // DOGFOOD: after the turn (off the hot path), let our plugged-in NLP namer upgrade the names
+    // of any category nodes the splits created this turn. Fire-and-forget — never blocks the UI.
+    memory.enrichCategoryNames().then(function (n) {
+      if (n > 0) {
+        console.log('[NodeNamer] upgraded ' + n + ' category node name(s) via the NLP plug');
+        refreshStats();
+        autoSave(); // naming runs after the turn's autoSave, so persist the new names now
+      }
+    }).catch(function (e) { console.warn('[NodeNamer] enrich failed:', e.message); });
   }
 
   // === Trim ===

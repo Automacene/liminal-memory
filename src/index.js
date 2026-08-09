@@ -21,6 +21,40 @@ import { Tool } from "./tools/base.js";
 import { Pocket } from "./core/pocket.js";
 import { Settings } from "./core/settings.js";
 
+/**
+ * Pluggable connection points. Pass any of these to the constructor to override the built-in
+ * default; omit them and the library behaves exactly as before.
+ *
+ * @typedef {object} StorageAdapter  Cold storage for archived blocks.
+ * @property {() => Promise<void>} init
+ * @property {(key: string, nodes: object[]) => Promise<void>} store
+ * @property {(key: string) => Promise<object[]>} retrieve
+ * @property {(key: string) => Promise<void>} delete
+ *
+ * @typedef {object} Transport  Talks to the model.
+ * @property {(messages: {role: string, content: string}[]) => Promise<{text: string, usage: object|null}>} complete
+ * @property {(nodes: object[]) => Promise<object>} generateSummary
+ *
+ * @typedef {object} Summarizer  Writes the summary for an archived block.
+ * @property {(nodes: object[]) => Promise<object>} generateSummary
+ *
+ * @callback NodeNamer  Names a split category node (runs off the hot path).
+ * @param {object[]} memberNodes  the cluster's member nodes
+ * @param {{categoryNode: object}} ctx
+ * @returns {Promise<{label?: string, keywords?: string[]}|null>}  a nicer name, or null to keep the default
+ *
+ * @typedef {object} LuminalMemoryOptions  Config values (see src/config.js) plus the sockets:
+ * @property {StorageAdapter} [storageAdapter]  default: built-in Archive (IndexedDB / in-memory)
+ * @property {Transport} [transport]  default: built-in LLMTransport
+ * @property {Summarizer} [summarizer]  default: the transport
+ * @property {NodeNamer} [nodeNamer]  default: none (keep instant keyword names)
+ */
+
+/**
+ * Infinite-context memory for any LLM. Construct it, `init()`, then call `chat()` / `trim()` /
+ * `search()` etc. Public methods are the API; `_`-prefixed methods are internal.
+ * @param {LuminalMemoryOptions} [userConfig]
+ */
 export class LuminalMemory {
   constructor(userConfig = {}) {
     this.config = createConfig(userConfig);
@@ -32,9 +66,13 @@ export class LuminalMemory {
     this.bm25 = new BM25(this.config.bm25);
     this.bloom = new BloomFilter(this.config.bloom);
     this.tfidf = new TfIdf();
-    this.archive = new Archive();
+    // Pluggable connection points — pass your own to override (shapes: see LuminalMemoryOptions above).
+    this.archive = userConfig.storageAdapter || new Archive();
     this.memoryManager = new MemoryManager(this.chain, this.config);
-    this.transport = new LLMTransport(this.config);
+    this.transport = userConfig.transport || new LLMTransport(this.config);
+    this.summarizer = userConfig.summarizer || this.transport; // defaults to the transport
+    this.nodeNamer = userConfig.nodeNamer || null;
+    if (this.nodeNamer) this.chain.recordCategoryNaming = true; // splits queue nodes for enrichCategoryNames()
     this.compaction = new Compaction(
       this.chain, this.bm25, this.bloom, this.tfidf, this.archive, this.config
     );
@@ -104,7 +142,6 @@ export class LuminalMemory {
         if (result.success) {
           toolResults.push({ name: toolDecision.name, result: result.result });
           toolsUsed.push({ name: toolDecision.name, params: toolDecision.params, result: result.result, elapsed: result.elapsed });
-          console.log(`[Chat] Tool "${toolDecision.name}" executed successfully in ${result.elapsed}ms`);
         } else {
           console.warn(`[Chat] Tool "${toolDecision.name}" failed: ${result.error}`);
         }
@@ -186,7 +223,6 @@ export class LuminalMemory {
 
     try {
       const { text: decision } = await this.transport.complete(messages);
-      console.log(`[Chat] Tool decision raw: ${decision.slice(0, 300)}`);
 
       // Clean up common model formatting issues before parsing
       let cleaned = decision
@@ -206,7 +242,7 @@ export class LuminalMemory {
           if (!parsed.use) return null;
           return { name: parsed.tool, params: parsed.params || {} };
         } catch (e) {
-          console.log(`[Chat] JSON parse failed, trying alternate formats: ${e.message}`);
+          // fall through to the alternate model formats below
         }
       }
 
@@ -221,26 +257,24 @@ export class LuminalMemory {
         for (const kv of kvMatches) {
           params[kv[1]] = kv[2].trim().replace(/^>+/, '').replace(/>+$/, '');
         }
-        console.log(`[Chat] Parsed Gemma tool call: ${toolName}`, params);
         return { name: toolName, params };
       }
 
       // Parse generic function call format: tool_name("query")
       const funcMatch = decision.match(/(\w+)\(["']([^"']+)["']\)/);
       if (funcMatch) {
-        console.log(`[Chat] Parsed function-style call: ${funcMatch[1]}("${funcMatch[2]}")`);
         return { name: funcMatch[1], params: { query: funcMatch[2] } };
       }
 
       // If the model just said it wants to search, extract a short query
       var searchIntent = decision.match(/search(?:ing)?\s+(?:for\s+)?["']([^"']+)["']/i);
       if (searchIntent && this.toolRegistry && this.toolRegistry.get('web_search')) {
-        console.log(`[Chat] Inferred search intent: "${searchIntent[1].trim()}"`);
         return { name: 'web_search', params: { query: searchIntent[1].trim().slice(0, 80) } };
       }
 
       return null;
     } catch (err) {
+      // A tool-routing hiccup shouldn't crash the chat — degrade to "no tool this turn".
       console.warn("[Chat] Tool decision failed:", err.message);
       return null;
     }
@@ -347,7 +381,7 @@ export class LuminalMemory {
 
     if (!summary) {
       const nodes = this.chain.range(from, to);
-      summary = await this.transport.generateSummary(nodes);
+      summary = await this.summarizer.generateSummary(nodes);
     }
 
     return this.compaction.trim(from, to, summary);
@@ -367,7 +401,7 @@ export class LuminalMemory {
       const ids = new Set(nodeIds);
       const nodes = this.chain.all().filter(n => ids.has(n.id) && n.role !== "compaction");
       if (nodes.length > 0) {
-        summary = await this.transport.generateSummary(nodes);
+        summary = await this.summarizer.generateSummary(nodes);
       }
     }
 
@@ -411,7 +445,7 @@ export class LuminalMemory {
       const windowIds = new Set(windowNodes.map(n => n.id));
       const nodesToTrim = allNodes.filter(n => !windowIds.has(n.id));
       if (nodesToTrim.length > 0) {
-        summary = await this.transport.generateSummary(nodesToTrim);
+        summary = await this.summarizer.generateSummary(nodesToTrim);
       }
     }
 
@@ -428,6 +462,37 @@ export class LuminalMemory {
   }
 
   /**
+   * Upgrade category-node names via the plugged-in nodeNamer, OFF the hot path — call after a turn
+   * or on idle. Splits only set the instant keyword name and queue the node; the (possibly slow)
+   * namer runs only here, so it never blocks a split or recall. No-op without a nodeNamer.
+   * @returns {Promise<number>} how many category nodes were renamed
+   */
+  async enrichCategoryNames() {
+    if (!this.nodeNamer) return 0;
+    const queue = this.chain.pendingCategoryNaming;
+    if (!queue || queue.length === 0) return 0;
+
+    const pending = queue.splice(0, queue.length); // drain and clear
+    let renamed = 0;
+    for (const { categoryId, memberIds } of pending) {
+      const categoryNode = this.chain.get(categoryId);
+      if (!categoryNode) continue; // may have been re-split or archived since
+      const memberNodes = memberIds.map(id => this.chain.get(id)).filter(Boolean);
+      try {
+        const result = await this.nodeNamer(memberNodes, { categoryNode });
+        if (result && result.label) categoryNode.content = result.label;
+        if (result && Array.isArray(result.keywords) && result.keywords.length) {
+          categoryNode.keywords = result.keywords;
+        }
+        if (result && (result.label || result.keywords)) renamed++;
+      } catch (e) {
+        console.warn(`[NodeNamer] failed to name category ${categoryId}: ${e.message}`);
+      }
+    }
+    return renamed;
+  }
+
+  /**
    * Branch to a new session. Archives everything, starts fresh.
    * @param {object} [summary]
    * @returns {string} archive key of the branched session
@@ -438,7 +503,7 @@ export class LuminalMemory {
     if (!summary) {
       const allNodes = this.chain.all();
       if (allNodes.length > 0) {
-        summary = await this.transport.generateSummary(allNodes.slice(-50));
+        summary = await this.summarizer.generateSummary(allNodes.slice(-50));
       }
     }
 

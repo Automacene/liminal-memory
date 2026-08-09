@@ -32,7 +32,6 @@ export class Pocket {
     };
     this.queue.push(note);
     this._emit(note);
-    console.log(`[Pocket] Queued #${note.id}: "${content.slice(0, 60)}"`);
     return note;
   }
 
@@ -47,7 +46,6 @@ export class Pocket {
     note.consumed = true;
     note.consumedAt = Date.now();
     this.consumed.push(note);
-    console.log(`[Pocket] Consumed #${note.id}: "${note.content.slice(0, 60)}"`);
     return note;
   }
 
@@ -139,7 +137,7 @@ export class Pocket {
 
   _emit(note) {
     for (const cb of this.listeners) {
-      try { cb(note); } catch (e) { /* swallow */ }
+      try { cb(note); } catch (e) { /* a listener throwing must not break the queue */ }
     }
   }
 }

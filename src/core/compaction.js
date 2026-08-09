@@ -30,13 +30,10 @@ export class Compaction {
   }
 
   /**
-   * Archive an arbitrary, possibly NON-CONTIGUOUS set of node IDs as a single cold-storage
-   * block — the sibling of trim() for topic clusters, which rarely occupy a contiguous ID
-   * range (a recurring subject can surface at turn 12, 40, and 90). Resolves the ids to nodes
-   * (deduped, skipping ids that don't exist and any existing compaction marker), archives the
-   * exact set as one block with one summary marker, and works regardless of where those nodes
-   * sit chronologically in the chain.
-   * @param {number[]} nodeIds - the exact set of node ids to archive, any order
+   * Archive an arbitrary, non-contiguous set of node ids as one cold-storage block — the sibling
+   * of trim() for topic clusters that don't occupy a contiguous range. Dedupes, skips missing ids
+   * and existing markers, then archives the set as one block with one summary marker.
+   * @param {number[]} nodeIds - node ids to archive, any order
    * @param {object} [summary] - { startTopic, keyDecisions, openThreads }
    * @returns {object} the compaction marker node
    */
@@ -52,22 +49,17 @@ export class Compaction {
     if (nodes.length === 0) {
       throw new Error("No archivable nodes found for the given id set");
     }
-    // Sort by id so the archived text, summary, and key are deterministic regardless of the
-    // order ids were passed in.
-    nodes.sort((a, b) => a.id - b.id);
+    nodes.sort((a, b) => a.id - b.id); // deterministic text/summary/key regardless of input order
 
     const sortedIds = nodes.map(n => n.id);
-    // Key is unique by construction (it IS the set), and lets restore() find its block.
-    const archiveKey = `archive_set_${sortedIds.join("_")}`;
+    const archiveKey = `archive_set_${sortedIds.join("_")}`; // unique by construction; restore() finds it
     return this._archiveNodes(nodes, archiveKey, summary, { nodeIds: sortedIds });
   }
 
   /**
-   * Shared archiving primitive for trim()/trimSet(): index the block (tf-idf + bloom), store it
-   * in cold storage, drop the nodes from active memory + the BM25 index, and leave a single
-   * compaction marker in the chain. The only things that differ between contiguous and set
-   * archiving are *which* nodes and the *archive key* — those are chosen by the caller; this
-   * owns everything downstream so the two entry points can't drift.
+   * Shared archiving primitive for trim()/trimSet(): index the block (tf-idf + bloom), store it in
+   * cold storage, remove the nodes from memory + BM25, and append one compaction marker. Callers
+   * pick which nodes and the archive key; everything downstream lives here so the two can't drift.
    * @param {object[]} nodes - the exact nodes to archive
    * @param {string} archiveKey - unique cold-storage key
    * @param {object} summary - { startTopic, keyDecisions, openThreads }
@@ -102,19 +94,14 @@ export class Compaction {
       ...extraMeta
     };
 
-    // Remove archived nodes from active memory + the BM25 index (per-id, so it works for a
-    // non-contiguous set exactly as it does for a range).
+    // Remove per-id so a non-contiguous set works exactly like a range.
     for (const node of nodes) {
       this.chain.removeById(node.id);
       this.bm25.remove(node.id);
     }
 
-    // Insert the compaction marker into the chain (appended at the tail, real integer id).
     const marker = this.chain.append("compaction", "", metadata);
-
-    // Track the marker for retrieval ranking
-    this.markers.push({ archiveKey, startNode, endNode, vector });
-
+    this.markers.push({ archiveKey, startNode, endNode, vector }); // tracked for retrieval ranking
     return marker;
   }
 
