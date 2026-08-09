@@ -66,6 +66,67 @@ describe("Compaction", () => {
     assert.ok(vectors[0].vector instanceof Map);
   });
 
+  it("trimSet archives a non-contiguous set of node ids as one block", async () => {
+    const { chain, bm25, compaction } = setup();
+    const initialLength = chain.length;
+
+    // Nodes 2, 5, 9, 14 — scattered, not a contiguous range.
+    const marker = await compaction.trimSet([2, 5, 9, 14], {
+      startTopic: "scattered topic", keyDecisions: [], openThreads: []
+    });
+
+    // 4 nodes removed, 1 compaction marker added.
+    assert.strictEqual(chain.length, initialLength - 4 + 1);
+    // The marker records the exact set (sorted), plus min/max bounds.
+    assert.deepStrictEqual(marker.metadata.nodeIds, [2, 5, 9, 14]);
+    assert.strictEqual(marker.metadata.startNode, 2);
+    assert.strictEqual(marker.metadata.endNode, 14);
+    assert.strictEqual(marker.metadata.nodeCount, 4);
+    // Those exact nodes are gone from active memory + BM25; untouched ones remain.
+    for (const id of [2, 5, 9, 14]) assert.strictEqual(chain.get(id), undefined, `node ${id} archived`);
+    assert.ok(chain.get(3), "an unarchived node in between stays");
+    assert.strictEqual(bm25.search("message number 5", 5).some(r => r.nodeId === 5), false);
+
+    // Block vector is tracked under the set key.
+    const vectors = compaction.getBlockVectors();
+    assert.strictEqual(vectors.length, 1);
+    assert.strictEqual(vectors[0].key, "archive_set_2_5_9_14");
+  });
+
+  it("trimSet round-trips through restore", async () => {
+    const { chain, compaction } = setup();
+    await compaction.trimSet([2, 5, 9, 14], { startTopic: "t", keyDecisions: [], openThreads: [] });
+    const afterTrim = chain.length;
+
+    await compaction.restore("archive_set_2_5_9_14");
+
+    // The 4 nodes come back (net +4, minus the removed marker = +3 over afterTrim).
+    assert.ok(chain.length > afterTrim);
+    for (const id of [2, 5, 9, 14]) assert.ok(chain.get(id), `node ${id} restored`);
+  });
+
+  it("trimSet dedupes, skips missing ids and compaction markers, and orders by id", async () => {
+    const { chain, compaction } = setup();
+    const initialLength = chain.length;
+
+    // Pass duplicates, out-of-order ids, and a non-existent id (999).
+    const marker = await compaction.trimSet([9, 2, 9, 999, 5]);
+
+    assert.deepStrictEqual(marker.metadata.nodeIds, [2, 5, 9], "deduped, sorted, missing dropped");
+    assert.strictEqual(chain.length, initialLength - 3 + 1);
+
+    // A prior marker must never be re-archived by a later set.
+    const preMarkerLen = chain.length;
+    await assert.rejects(() => compaction.trimSet([marker.id]), /No archivable nodes/);
+    assert.strictEqual(chain.length, preMarkerLen, "no-op when the set resolves to nothing archivable");
+  });
+
+  it("trimSet throws on an empty or fully-missing set", async () => {
+    const { compaction } = setup();
+    await assert.rejects(() => compaction.trimSet([]), /No archivable nodes/);
+    await assert.rejects(() => compaction.trimSet([9999, 8888]), /No archivable nodes/);
+  });
+
   it("exports and imports state", async () => {
     const { compaction } = setup();
 
