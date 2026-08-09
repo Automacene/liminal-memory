@@ -14,7 +14,7 @@
  * @property {string} pool      name of the pool holding this node
  * @property {*} content        yours: a string, `{user, assistant}`, a chunk, anything
  * @property {object} tags      yours: whatever your tagger produces
- * @property {object} graph     yours: edges, in the default form `{to: [], from: []}`
+ * @property {object} graph     yours: whatever your graph algorithm stores
  * @property {NodeMetadata} metadata  `createdAt` and `updatedAt` are ours, the rest is yours
  *
  * @typedef {object} NodeMetadata
@@ -26,10 +26,14 @@
  * Build a node. Called by the pool, which supplies the id, pool name, and timestamp, so you
  * normally reach for `pool.create()` rather than this.
  *
- * `content` is the only required part, and it can be any type including `null`. The three
- * open buckets default to empty so callers never have to guard before reading them. `graph`
- * defaults to the edge lists the built-in graph algorithm uses, and a custom algorithm is
- * free to replace that object entirely with its own layout.
+ * `content` is the only required part, and it can be any type including `null`. A node with
+ * null content is structural: the search engine skips it, so it can only ever be reached by
+ * walking the graph. That has to be said out loud rather than fallen into, which is why an
+ * omitted `content` throws while an explicit null does not.
+ *
+ * `tags` and `graph` default to empty objects and stay that way. This function deliberately
+ * does not know what the default tagger or graph algorithm looks like, so neither one gets to
+ * stamp its layout onto every node. Each writes its own key the first time it runs.
  *
  * @param {object} params
  * @param {string} params.id
@@ -51,7 +55,7 @@ export function createNode({ id, pool, content, tags, graph, metadata, at }) {
     pool,
     content,
     tags: tags ?? {},
-    graph: graph ?? { to: [], from: [] },
+    graph: graph ?? {},
     metadata: { createdAt: at, updatedAt: at, ...metadata }
   };
 }
@@ -79,7 +83,7 @@ export function patchNode(node, patch, at) {
 
   if ("content" in patch) next.content = patch.content;
   if ("tags" in patch) next.tags = patch.tags ?? {};
-  if ("graph" in patch) next.graph = patch.graph ?? { to: [], from: [] };
+  if ("graph" in patch) next.graph = patch.graph ?? {};
 
   return next;
 }

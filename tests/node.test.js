@@ -7,7 +7,7 @@ describe("node specification", () => {
     const node = createNode({ id: "n1", pool: "main", content: "hello", at: 1000 });
 
     assert.deepEqual(node.tags, {});
-    assert.deepEqual(node.graph, { to: [], from: [] });
+    assert.deepEqual(node.graph, {});
     assert.equal(node.content, "hello");
     assert.equal(node.pool, "main");
   });
@@ -44,7 +44,13 @@ describe("node specification", () => {
     assert.equal(node.metadata.createdAt, 1);
   });
 
-  test("a custom graph layout replaces the default entirely", () => {
+  test("both open buckets stay empty, so no algorithm's layout is stamped on every node", () => {
+    const node = createNode({ id: "n1", pool: "main", content: "x", at: 1 });
+    assert.deepEqual(node.tags, {});
+    assert.deepEqual(node.graph, {});
+  });
+
+  test("a caller-supplied graph layout is kept as given", () => {
     const node = createNode({
       id: "n1", pool: "main", content: "x", at: 1, graph: { adjacency: { a: 0.5 } }
     });

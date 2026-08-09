@@ -10,6 +10,8 @@
  */
 import { generateId } from "./id.js";
 import { createNode, patchNode } from "./node.js";
+import { keywordTagger } from "./tag/keywords.js";
+import { BM25 } from "./search/bm25.js";
 
 /**
  * Pulled in explicitly rather than relied on as a global: the browser lib already has a `Node`,
@@ -34,8 +36,13 @@ export class Pool {
    *   timestamps and anything derived from them exactly reproducible in tests.
    * @param {(nodes: Node[], pool: Pool) => any} [options.onEvict]  called with the nodes
    *   leaving the pool, before they are dropped. Persist them here if you want them back.
+   * @param {{forNode: Function, forQuery: Function}} [options.tagger]  turns content into the
+   *   terms the engine indexes, and a query into the terms it looks up. Defaults to keywords.
+   * @param {{add: Function, remove: Function, search: Function, clear: Function}} [options.engine]
+   *   ranks ids against terms. Defaults to BM25. Swap both together, since an engine only
+   *   understands the terms its paired tagger produces.
    */
-  constructor(name, { now = Date.now, onEvict = null } = {}) {
+  constructor(name, { now = Date.now, onEvict = null, tagger = null, engine = null } = {}) {
     if (!name || typeof name !== "string") {
       throw new Error("[liminal] a pool needs a name");
     }
@@ -43,9 +50,19 @@ export class Pool {
     this.name = name;
     this.now = now;
     this.onEvict = onEvict;
+    this.tagger = tagger ?? keywordTagger();
+    this.engine = engine ?? new BM25();
 
     /** @type {Map<string, Node>} insertion-ordered, which is what makes "oldest" meaningful */
     this._nodes = new Map();
+
+    /**
+     * Nodes that exist but are not in the index yet, drained on the next search. Loading a
+     * snapshot puts everything here rather than re-tagging the whole pool up front, so the
+     * cost lands on the first query instead of on startup.
+     * @type {Set<string>}
+     */
+    this._pending = new Set();
   }
 
   /**
@@ -82,6 +99,7 @@ export class Pool {
     });
 
     this._nodes.set(node.id, node);
+    await this._index(node);
     return node;
   }
 
@@ -118,7 +136,13 @@ export class Pool {
     }
 
     const next = patchNode(existing, patch, this.now());
+
+    // New content with no tags to go with it means the old tags describe text that is gone,
+    // so they get dropped and rebuilt. Tags handed in explicitly are always left alone.
+    if ("content" in patch && !("tags" in patch)) next.tags = {};
+
     this._nodes.set(id, next);
+    await this._index(next);
     return next;
   }
 
@@ -141,7 +165,10 @@ export class Pool {
 
     if (this.onEvict) await this.onEvict(going, this);
 
-    for (const node of going) this._nodes.delete(node.id);
+    for (const node of going) {
+      this._nodes.delete(node.id);
+      this._forget(node.id);
+    }
     return going;
   }
 
@@ -153,6 +180,53 @@ export class Pool {
   async evictOldest(count) {
     if (!(count > 0)) return [];
     return this.evict(this.ids().slice(0, count));
+  }
+
+  /**
+   * The nodes matching a query, best first.
+   *
+   * The same pool and the same query always give the same nodes in the same order. Nothing
+   * here consults the clock, and the engine breaks score ties on id rather than leaving them
+   * to insertion order.
+   *
+   * Nodes with null content are never returned, because there is nothing to match against.
+   * Reach them by walking the graph instead.
+   *
+   * @param {string} query
+   * @param {object} [options]
+   * @param {number} [options.limit]
+   * @returns {Promise<Node[]>}
+   */
+  async search(query, options = {}) {
+    const ranked = await this.rank(query, options);
+    return ranked.map(hit => hit.node);
+  }
+
+  /**
+   * The same as `search`, keeping the score alongside each node.
+   *
+   * Worth knowing before comparing scores across pools: they are not comparable. A score is
+   * relative to the term statistics of the pool that produced it, so merging two pools' results
+   * means normalizing each side first, usually by dividing by that pool's top score.
+   *
+   * @param {string} query
+   * @param {object} [options]
+   * @param {number} [options.limit]
+   * @returns {Promise<{node: Node, score: number}[]>}
+   */
+  async rank(query, { limit = 10 } = {}) {
+    await this._drainPending();
+
+    const terms = await this.tagger.forQuery(query);
+    const hits = this.engine.search(terms, limit);
+
+    const ranked = [];
+    for (const hit of hits) {
+      const node = this._nodes.get(hit.id);
+      if (node) ranked.push({ node, score: hit.score });
+    }
+
+    return ranked;
   }
 
   /**
@@ -200,6 +274,7 @@ export class Pool {
    * @returns {boolean} whether a node was there to remove
    */
   remove(id) {
+    this._forget(id);
     return this._nodes.delete(id);
   }
 
@@ -208,6 +283,8 @@ export class Pool {
    */
   clear() {
     this._nodes.clear();
+    this._pending.clear();
+    this.engine.clear();
   }
 
   /**
@@ -225,10 +302,62 @@ export class Pool {
    * @returns {Pool}
    */
   load(snapshot) {
-    this._nodes.clear();
+    this.clear();
+
     for (const node of snapshot?.nodes ?? []) {
       this._nodes.set(node.id, { ...node, pool: this.name });
+      this._pending.add(node.id);
     }
+
     return this;
+  }
+
+  /**
+   * Tag a node if it needs it, then put it in the index.
+   *
+   * A node arrives untagged in the usual case and gets tagged here. One that already carries
+   * tags is left alone, whether they came from the caller or from a previous run, so hand-written
+   * tags are never silently overwritten.
+   *
+   * @param {Node} node
+   * @returns {Promise<void>}
+   */
+  async _index(node) {
+    this._pending.delete(node.id);
+
+    if (node.content == null) {
+      this.engine.remove(node.id);
+      return;
+    }
+
+    if (Object.keys(node.tags).length === 0) {
+      node.tags = await this.tagger.forNode(node);
+    }
+
+    this.engine.add(node.id, await this.tagger.termsOf(node.tags));
+  }
+
+  /**
+   * Bring every node waiting to be indexed into the index. Called before a query so a pool
+   * loaded from a snapshot is searchable without anyone having to remember to rebuild it.
+   * @returns {Promise<void>}
+   */
+  async _drainPending() {
+    if (this._pending.size === 0) return;
+
+    for (const id of Array.from(this._pending)) {
+      const node = this._nodes.get(id);
+      if (node) await this._index(node);
+      else this._pending.delete(id);
+    }
+  }
+
+  /**
+   * Drop a node from the index and from the waiting list.
+   * @param {string} id
+   */
+  _forget(id) {
+    this._pending.delete(id);
+    this.engine.remove(id);
   }
 }
