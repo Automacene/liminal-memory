@@ -21,6 +21,40 @@ import { Tool } from "./tools/base.js";
 import { Pocket } from "./core/pocket.js";
 import { Settings } from "./core/settings.js";
 
+/**
+ * Pluggable connection points. Pass any of these to the constructor to override the built-in
+ * default; omit them and the library behaves exactly as before.
+ *
+ * @typedef {object} StorageAdapter  Cold storage for archived blocks.
+ * @property {() => Promise<void>} init
+ * @property {(key: string, nodes: object[]) => Promise<void>} store
+ * @property {(key: string) => Promise<object[]>} retrieve
+ * @property {(key: string) => Promise<void>} delete
+ *
+ * @typedef {object} Transport  Talks to the model.
+ * @property {(messages: {role: string, content: string}[]) => Promise<{text: string, usage: object|null}>} complete
+ * @property {(nodes: object[]) => Promise<object>} generateSummary
+ *
+ * @typedef {object} Summarizer  Writes the summary for an archived block.
+ * @property {(nodes: object[]) => Promise<object>} generateSummary
+ *
+ * @callback NodeNamer  Names a split category node (runs off the hot path).
+ * @param {object[]} memberNodes  the cluster's member nodes
+ * @param {{categoryNode: object}} ctx
+ * @returns {Promise<{label?: string, keywords?: string[]}|null>}  a nicer name, or null to keep the default
+ *
+ * @typedef {object} LuminalMemoryOptions  Config values (see src/config.js) plus the sockets:
+ * @property {StorageAdapter} [storageAdapter]  default: built-in Archive (IndexedDB / in-memory)
+ * @property {Transport} [transport]  default: built-in LLMTransport
+ * @property {Summarizer} [summarizer]  default: the transport
+ * @property {NodeNamer} [nodeNamer]  default: none (keep instant keyword names)
+ */
+
+/**
+ * Infinite-context memory for any LLM. Construct it, `init()`, then call `chat()` / `trim()` /
+ * `search()` etc. Public methods are the API; `_`-prefixed methods are internal.
+ * @param {LuminalMemoryOptions} [userConfig]
+ */
 export class LuminalMemory {
   constructor(userConfig = {}) {
     this.config = createConfig(userConfig);
@@ -32,20 +66,13 @@ export class LuminalMemory {
     this.bm25 = new BM25(this.config.bm25);
     this.bloom = new BloomFilter(this.config.bloom);
     this.tfidf = new TfIdf();
-    // Pluggable connection points — pass your own to override, omit for the built-in default.
-    // Storage backend: must implement init/store/retrieve/delete (see src/storage/archive.js).
+    // Pluggable connection points — pass your own to override (shapes: see LuminalMemoryOptions above).
     this.archive = userConfig.storageAdapter || new Archive();
     this.memoryManager = new MemoryManager(this.chain, this.config);
-    // Model transport: must implement complete(messages) and generateSummary(nodes).
     this.transport = userConfig.transport || new LLMTransport(this.config);
-    // Summarizer: writes the summary for an archived block. Must implement generateSummary(nodes).
-    // Defaults to the transport, so swapping the model swaps summaries too — unless overridden here.
-    this.summarizer = userConfig.summarizer || this.transport;
-    // Node namer: gives split category nodes nicer names, OFF the hot path. A function
-    // (memberNodes, ctx) => { label?, keywords? } | null. Default = keep the instant keyword name.
-    // When supplied, splits queue their new category nodes for renaming via enrichCategoryNames().
+    this.summarizer = userConfig.summarizer || this.transport; // defaults to the transport
     this.nodeNamer = userConfig.nodeNamer || null;
-    if (this.nodeNamer) this.chain.recordCategoryNaming = true;
+    if (this.nodeNamer) this.chain.recordCategoryNaming = true; // splits queue nodes for enrichCategoryNames()
     this.compaction = new Compaction(
       this.chain, this.bm25, this.bloom, this.tfidf, this.archive, this.config
     );
