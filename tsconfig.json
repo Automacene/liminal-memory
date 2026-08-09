@@ -4,10 +4,12 @@
     "checkJs": false,
     "declaration": true,
     "emitDeclarationOnly": true,
-    "outFile": "dist/index.d.ts",
-    "module": "amd",
+    "outDir": "dist/types",
+    "rootDir": "src",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "target": "es2022",
-    "moduleResolution": "classic",
+    "strict": false,
     "skipLibCheck": true
   },
   "include": ["src/**/*.js"]

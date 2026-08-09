@@ -16,8 +16,8 @@
 
 A small library for deterministic recall over a pool of nodes.
 
-Language models have two problems with long conversations. The obvious one is capacity — the
-window fills and older material falls out. The less obvious one is that a bigger window does not
+Language models have two problems with long conversations. The obvious one is capacity, where
+the window fills and older material falls out. The less obvious one is that a bigger window does not
 fix it: the model still has to locate the relevant part on its own, softly and unpredictably.
 
 Liminal Memory takes the finding step out of the model. You keep your content as nodes in memory,
@@ -26,5 +26,5 @@ the same query return the same nodes every time, and you can point at the reason
 back.
 
 It manages the lifecycle of those nodes and nothing else. Tagging, graph traversal, and the
-content itself are yours to define — with a working default for each, so the simple case stays
+content itself are yours to define, with a working default for each, so the simple case stays
 simple.

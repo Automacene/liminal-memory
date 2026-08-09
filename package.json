@@ -24,7 +24,7 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/types/index.d.ts",
       "import": "./src/index.js",
       "default": "./src/index.js"
     },

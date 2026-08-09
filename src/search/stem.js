@@ -1,12 +1,12 @@
 /**
- * Conservative stemmer — collapses common inflected forms to a shared stem so related nodes match
+ * Conservative stemmer. Collapses common inflected forms to a shared stem so related nodes match
  * across different endings ("index"/"indexing"/"indexed"). Deliberately gentle (only -s/-es/-ies,
  * -ing, -ed with length guards, never short words): in a memory graph a false match silently
  * pollutes recall, so we accept missing a few variants over an aggressive stemmer's wrong merges
  * ("universe"/"university"). Pure, deterministic, idempotent.
  *
  * MUST be applied identically everywhere terms are produced (node keywords, BM25 index + query,
- * retrieval tokenizing) — stemming one side but not the other silently breaks matching.
+ * retrieval tokenizing), because stemming one side but not the other silently breaks matching.
  * @param {string} term
  * @returns {string} the stemmed term
  */

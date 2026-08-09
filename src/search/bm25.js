@@ -1,5 +1,5 @@
 /**
- * BM25 — Best Matching 25 scoring engine.
+ * BM25, the Best Matching 25 scoring engine.
  * Pure JavaScript implementation. No dependencies.
  * Operates over an in-memory inverted index of nodes.
  */
@@ -171,7 +171,7 @@ export function tokenize(text) {
 const STOPWORDS = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','might','shall','can','may','must','need','this','that','these','those','which','what','who','whom','where','when','why','how','not','no','nor','but','and','or','if','then','else','than','too','very','just','about','all','also','any','because','before','between','both','by','each','few','for','from','further','here','in','into','its','more','most','of','on','once','only','other','out','over','own','same','so','some','such','their','them','there','through','to','under','until','up','us','we','with','you','your','our','it','they','he','she','him','her','his','my','me','i','am','at','as','please','tell','explain','can','want','know','like','think','get','make','use','let','say','see']);
 
 /**
- * Extract keywords from a query string — same filtering as node keyword extraction.
+ * Extract keywords from a query string, using the same filtering as node keyword extraction.
  * Stopwords removed, 3+ char terms only.
  * @param {string} query
  * @returns {string[]}
