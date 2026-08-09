@@ -4,6 +4,8 @@
  * 
  * Each node is a TURN (user query + assistant response paired together).
  */
+import { maybeSplit } from "./node-split.js";
+
 export class Chain {
   constructor() {
     this.nodes = [];
@@ -127,6 +129,39 @@ export class Chain {
     if (!to.graph) to.graph = { edges_to: [], edges_from: [] };
     if (!from.graph.edges_to.includes(toNodeId)) from.graph.edges_to.push(toNodeId);
     if (!to.graph.edges_from.includes(fromNodeId)) to.graph.edges_from.push(fromNodeId);
+
+    // Phase 3: the node that just gained a child may now be overflowing. Hand it to the
+    // splitter (src/core/node-split.js), which owns the clustering algorithm so Chain stays
+    // a plain data structure. Only `from` gains a child on a link, so only it can overflow.
+    maybeSplit(this, from);
+  }
+
+  /**
+   * Distinct neighbor IDs of a node (union of both edge directions).
+   * @param {object} node
+   * @returns {number[]}
+   */
+  _neighborIds(node) {
+    const g = node.graph || { edges_to: [], edges_from: [] };
+    return Array.from(new Set([...(g.edges_to || []), ...(g.edges_from || [])]));
+  }
+
+  _neighborCount(node) {
+    return this._neighborIds(node).length;
+  }
+
+  /** Add a directional edge a→b directly, bypassing the overflow check (used mid-split). */
+  _rawLink(a, b) {
+    if (!a.graph.edges_to.includes(b.id)) a.graph.edges_to.push(b.id);
+    if (!b.graph.edges_from.includes(a.id)) b.graph.edges_from.push(a.id);
+  }
+
+  /** Remove any edges between two nodes, in both directions. */
+  _unlink(a, b) {
+    a.graph.edges_to = a.graph.edges_to.filter(id => id !== b.id);
+    a.graph.edges_from = a.graph.edges_from.filter(id => id !== b.id);
+    b.graph.edges_to = b.graph.edges_to.filter(id => id !== a.id);
+    b.graph.edges_from = b.graph.edges_from.filter(id => id !== a.id);
   }
 
   /**
