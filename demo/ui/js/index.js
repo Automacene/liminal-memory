@@ -1,5 +1,5 @@
 /**
- * LUMINAL MEMORY — Demo UI JavaScript Interface
+ * LIMINAL MEMORY — Demo UI JavaScript Interface
  * ================================================================
  * Single entry point for all demo UI scripts.
  * AI agents: read this file to understand the full UI module map.
@@ -36,7 +36,7 @@
  * internal/tools/toolchain.js     — Multi-step deterministic tool execution
  *
  * internal/app.js                 — Main app controller:
- *   - Initializes LuminalMemory engine with config
+ *   - Initializes LiminalMemory engine with config
  *   - Loads conversation fixtures
  *   - Detects LLM server + thinking support
  *   - Wires send handler (retrieval → prompt build → stream → store)

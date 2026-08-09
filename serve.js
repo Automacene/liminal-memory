@@ -241,7 +241,7 @@ const server = createServer(async (req, res) => {
     try {
       const pageRes = await fetch(targetUrl, {
         headers: {
-          "User-Agent": "LuminalMemory/1.0 (Research Bot; respectful; single-page fetch)",
+          "User-Agent": "LiminalMemory/1.0 (Research Bot; respectful; single-page fetch)",
           "Accept": "text/html,application/xhtml+xml"
         },
         signal: AbortSignal.timeout(8000)
@@ -608,7 +608,7 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   const demoUrl = `http://localhost:${PORT}/demo/`;
 
-  console.log(`\n  Luminal Memory dev server running at:\n`);
+  console.log(`\n  Liminal Memory dev server running at:\n`);
   console.log(`  → ${demoUrl}\n`);
   console.log(`  API endpoints:`);
   console.log(`    GET /api/read?path=src/config.js`);

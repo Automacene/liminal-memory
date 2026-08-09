@@ -1,15 +1,15 @@
 /**
- * One-time ingestion script — chunks reference docs into Luminal Memory nodes.
+ * One-time ingestion script — chunks reference docs into Liminal Memory nodes.
  * Run: node ingest-docs.js
  * Then start serve.js and the demo will restore these nodes.
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { LuminalMemory } from './src/index.js';
+import { LiminalMemory } from './src/index.js';
 
 const DOCS = [
   {
-    path: 'agents/luminal-memory-reference.md',
+    path: 'agents/liminal-memory-reference.md',
     prefix: '[Reference]',
     // Include all sections — this is the system's self-knowledge
     filter: null
@@ -118,9 +118,9 @@ function chunkByHeadings(text) {
 }
 
 async function main() {
-  console.log('=== Luminal Memory Document Ingestion ===\n');
+  console.log('=== Liminal Memory Document Ingestion ===\n');
 
-  const memory = new LuminalMemory({});
+  const memory = new LiminalMemory({});
   await memory.init();
 
   let totalNodes = 0;
@@ -150,7 +150,7 @@ async function main() {
     totalNodes += ingested;
   }
 
-  // Also ingest the demo fixture conversation (the knowledge base about how to USE Luminal)
+  // Also ingest the demo fixture conversation (the knowledge base about how to USE Liminal)
   console.log(`\nProcessing: demo/fixtures/knowledge-base.js`);
   const fixtureText = await readFile('demo/fixtures/knowledge-base.js', 'utf8');
   // Extract the conversation array — it's an export

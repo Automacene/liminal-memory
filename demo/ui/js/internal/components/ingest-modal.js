@@ -161,7 +161,7 @@ var IngestModal = (function () {
     }
 
     // Store chunks as nodes in memory
-    var memory = window._luminalMemory;
+    var memory = window._liminalMemory;
     if (!memory) {
       resultEl.style.color = '#ff6b6b';
       resultEl.textContent = '✗ Memory not initialized.';
@@ -195,7 +195,7 @@ var IngestModal = (function () {
     resultEl.textContent = 'Ingesting ' + selectedFolder.length + ' files...';
 
     // Read all files from the selected folder via File System Access API
-    var memory = window._luminalMemory;
+    var memory = window._liminalMemory;
     if (!memory) {
       resultEl.style.color = '#ff6b6b';
       resultEl.textContent = '✗ Memory not initialized.';

@@ -1,5 +1,5 @@
 /**
- * Luminal Memory — Zero-dependency infinite context memory for any LLM.
+ * Liminal Memory — Zero-dependency infinite context memory for any LLM.
  * Main entrypoint and public API.
  */
 import { createConfig } from "./config.js";
@@ -43,7 +43,7 @@ import { Settings } from "./core/settings.js";
  * @param {{categoryNode: object}} ctx
  * @returns {Promise<{label?: string, keywords?: string[]}|null>}  a nicer name, or null to keep the default
  *
- * @typedef {object} LuminalMemoryOptions  Config values (see src/config.js) plus the sockets:
+ * @typedef {object} LiminalMemoryOptions  Config values (see src/config.js) plus the sockets:
  * @property {StorageAdapter} [storageAdapter]  default: built-in Archive (IndexedDB / in-memory)
  * @property {Transport} [transport]  default: built-in LLMTransport
  * @property {Summarizer} [summarizer]  default: the transport
@@ -53,9 +53,9 @@ import { Settings } from "./core/settings.js";
 /**
  * Infinite-context memory for any LLM. Construct it, `init()`, then call `chat()` / `trim()` /
  * `search()` etc. Public methods are the API; `_`-prefixed methods are internal.
- * @param {LuminalMemoryOptions} [userConfig]
+ * @param {LiminalMemoryOptions} [userConfig]
  */
-export class LuminalMemory {
+export class LiminalMemory {
   constructor(userConfig = {}) {
     this.config = createConfig(userConfig);
 
@@ -66,7 +66,7 @@ export class LuminalMemory {
     this.bm25 = new BM25(this.config.bm25);
     this.bloom = new BloomFilter(this.config.bloom);
     this.tfidf = new TfIdf();
-    // Pluggable connection points — pass your own to override (shapes: see LuminalMemoryOptions above).
+    // Pluggable connection points — pass your own to override (shapes: see LiminalMemoryOptions above).
     this.archive = userConfig.storageAdapter || new Archive();
     this.memoryManager = new MemoryManager(this.chain, this.config);
     this.transport = userConfig.transport || new LLMTransport(this.config);
