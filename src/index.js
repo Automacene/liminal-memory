@@ -11,6 +11,8 @@
  * tagged, and how the graph works are yours, each with a working default.
  */
 import { Pool } from "./pool.js";
+import { BM25_DEFAULTS } from "./search/bm25.js";
+import { KEYWORD_DEFAULTS } from "./tag/keywords.js";
 
 /**
  * Re-stated here so the published types carry them, and so `Node` doesn't resolve to the
@@ -35,11 +37,16 @@ export class LiminalMemory {
    *   timestamps and anything derived from them exactly reproducible in tests.
    * @param {(nodes: Node[], pool: Pool) => any} [options.onEvict]  default eviction hook,
    *   inherited by every pool unless that pool overrides it.
+   * @param {object} [options.tagger]  default tagger, inherited by every pool
+   * @param {object} [options.engine]  default search engine. A factory function is called once
+   *   per pool, since an engine holds one pool's index and cannot be shared between them.
    */
-  constructor({ defaultPool = "main", now = Date.now, onEvict = null } = {}) {
+  constructor({ defaultPool = "main", now = Date.now, onEvict = null, tagger = null, engine = null } = {}) {
     this.defaultPoolName = defaultPool;
     this.now = now;
     this.onEvict = onEvict;
+    this.tagger = tagger;
+    this.engine = engine;
 
     /** @type {Map<string, Pool>} */
     this._pools = new Map();
@@ -57,9 +64,13 @@ export class LiminalMemory {
     const existing = this._pools.get(name);
     if (existing) return existing;
 
+    const inherited = typeof this.engine === "function" ? this.engine() : this.engine;
+
     const pool = new Pool(name, {
       now: options.now ?? this.now,
-      onEvict: options.onEvict ?? this.onEvict
+      onEvict: options.onEvict ?? this.onEvict,
+      tagger: options.tagger ?? this.tagger,
+      engine: options.engine ?? inherited
     });
     this._pools.set(name, pool);
     return pool;
@@ -163,6 +174,26 @@ export class LiminalMemory {
   }
 
   /**
+   * Search the default pool.
+   * @param {string} query
+   * @param {object} [options]
+   * @returns {Promise<Node[]>}
+   */
+  search(query, options) {
+    return this.pool().search(query, options);
+  }
+
+  /**
+   * Search the default pool, keeping scores.
+   * @param {string} query
+   * @param {object} [options]
+   * @returns {Promise<{node: Node, score: number}[]>}
+   */
+  rank(query, options) {
+    return this.pool().rank(query, options);
+  }
+
+  /**
    * A plain snapshot of every pool. Safe to `JSON.stringify`.
    * @returns {{defaultPool: string, pools: {name: string, nodes: Node[]}[]}}
    */
@@ -203,5 +234,16 @@ export { createNode, patchNode } from "./node.js";
 export { uuid, generateId } from "./id.js";
 export { BM25 } from "./search/bm25.js";
 export { stem } from "./search/stem.js";
+export { keywordTagger, extractKeywords, flattenToText, STOPWORDS } from "./tag/keywords.js";
+export { BM25_DEFAULTS, KEYWORD_DEFAULTS };
+
+/**
+ * Every tunable value in one place to read, without one module everything has to import from.
+ * Each still lives with the code that uses it, so overriding one means importing just that one.
+ */
+export const defaults = {
+  bm25: BM25_DEFAULTS,
+  keywords: KEYWORD_DEFAULTS
+};
 
 export default LiminalMemory;
