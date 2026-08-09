@@ -4,6 +4,8 @@
  * 2. If low confidence → bloom filter gate → TF-IDF rank → decompress → BM25 inner
  * 3. Returns relevant historical nodes for injection into the prompt
  */
+import { stem } from "../search/stem.js";
+
 export class Retrieval {
   constructor(chain, bm25, bloom, tfidf, compaction, archive, transport, config) {
     this.chain = chain;
@@ -222,5 +224,6 @@ function tokenizeLocal(text) {
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
-    .filter(t => t.length > 0);
+    .filter(t => t.length > 0)
+    .map(stem); // match the stemming used at index time
 }

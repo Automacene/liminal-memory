@@ -3,6 +3,8 @@
  * Pure JavaScript implementation. No dependencies.
  * Operates over an in-memory inverted index of nodes.
  */
+import { stem } from "./stem.js";
+
 export class BM25 {
   constructor(config = {}) {
     this.k1 = config.k1 || 1.2;
@@ -162,7 +164,8 @@ export function tokenize(text) {
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
-    .filter(t => t.length > 0);
+    .filter(t => t.length > 0)
+    .map(stem); // index the stemmed form so inflected variants share a term
 }
 
 const STOPWORDS = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','might','shall','can','may','must','need','this','that','these','those','which','what','who','whom','where','when','why','how','not','no','nor','but','and','or','if','then','else','than','too','very','just','about','all','also','any','because','before','between','both','by','each','few','for','from','further','here','in','into','its','more','most','of','on','once','only','other','out','over','own','same','so','some','such','their','them','there','through','to','under','until','up','us','we','with','you','your','our','it','they','he','she','him','her','his','my','me','i','am','at','as','please','tell','explain','can','want','know','like','think','get','make','use','let','say','see']);
@@ -179,7 +182,8 @@ function extractQueryKeywords(query) {
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(t => t.length >= 3 && !STOPWORDS.has(t));
+    .filter(t => t.length >= 3 && !STOPWORDS.has(t))
+    .map(stem); // stem the query the same way the index was stemmed, or nothing matches
 }
 
 /**
