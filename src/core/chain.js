@@ -5,6 +5,7 @@
  * Each node is a TURN (user query + assistant response paired together).
  */
 import { maybeSplit } from "./node-split.js";
+import { stem } from "../search/stem.js";
 
 export class Chain {
   constructor() {
@@ -291,7 +292,8 @@ function extractKeywordsFromContent(content) {
   const words = text.toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length >= 3 && !STOPWORDS.has(w));
+    .filter(w => w.length >= 3 && !STOPWORDS.has(w))
+    .map(stem); // collapse inflected variants so related nodes share keywords
   return Array.from(new Set(words));
 }
 
