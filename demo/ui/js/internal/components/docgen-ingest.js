@@ -153,7 +153,7 @@ var DocGenIngest = (function () {
       if (section.heading === '__overview__') {
         var overviewText = cleanBuffer(section.lines);
         if (overviewText.length > 50) {
-          nodes.push({ content: '[Doc: Project Overview]\n' + overviewText });
+          nodes.push({ content: 'Project Overview\n' + overviewText });
         }
         continue;
       }
@@ -164,10 +164,12 @@ var DocGenIngest = (function () {
       var summaryBuffer = [];
       var functions = [];
       var currentFn = null;
+      var dependsOn = [];
 
       for (var j = 0; j < fileLines.length; j++) {
         var fline = fileLines[j];
         var fnMatch = fline.match(/^#### `([^`]+)`(.*)/);
+        var impMatch = fline.match(/^\*\*Imports from:\*\*\s*(.+)/);
 
         if (fnMatch) {
           // Flush current function
@@ -177,6 +179,15 @@ var DocGenIngest = (function () {
           currentFn = { name: fnMatch[1], meta: fnMatch[2] || '', lines: [] };
         } else if (currentFn) {
           currentFn.lines.push(fline);
+        } else if (impMatch) {
+          // Capture REAL dependency edges from DocGen's deterministic import analysis, and
+          // keep this structural line OUT of the summary text so its words don't pollute
+          // keywords. These become file→file graph edges at build time (maps the codebase).
+          var refs = impMatch[1].match(/`([^`]+)`/g) || [];
+          for (var r = 0; r < refs.length; r++) dependsOn.push(refs[r].replace(/`/g, ''));
+        } else if (/^\*\*(Imported by|Uses globals|Referenced by):\*\*/.test(fline)) {
+          // Reverse/global structural lines — excluded from keyword content; the forward
+          // "Imports from" edges already capture graph direction (reverse is implied).
         } else {
           // Before any #### — this is file summary content
           summaryBuffer.push(fline);
@@ -184,10 +195,10 @@ var DocGenIngest = (function () {
       }
       if (currentFn) functions.push(currentFn);
 
-      // Create file summary node (includes path, line count, exports, deps, description)
+      // Create file summary node — carries filePath + its dependencies for edge wiring.
       var summaryText = cleanBuffer(summaryBuffer);
       if (summaryText.length > 30) {
-        nodes.push({ content: '[Doc: ' + filePath + '] Summary\n' + summaryText });
+        nodes.push({ content: filePath + '\n' + summaryText, filePath: filePath, dependsOn: dependsOn });
       }
 
       // Create function nodes (each tagged with full file path)
@@ -195,7 +206,7 @@ var DocGenIngest = (function () {
         var fn = functions[f];
         var fnContent = cleanBuffer(fn.lines);
         if (fnContent.length > 20) {
-          nodes.push({ content: '[Doc: ' + filePath + ' → ' + fn.name + ']' + fn.meta + '\n' + fnContent });
+          nodes.push({ content: filePath + ' ' + fn.name + '\n' + fnContent, filePath: filePath });
         }
       }
     }
@@ -207,16 +218,29 @@ var DocGenIngest = (function () {
    * Clean a buffer of lines — remove HTML tags, empty lines at start/end, collapse whitespace.
    */
   function cleanBuffer(lines) {
-    return lines
-      .filter(function (l) {
-        // Keep code blocks and content, skip HTML wrapper tags and separators
-        if (l === '---') return false;
-        if (/^<\/?details>?/.test(l)) return false;
-        if (/^<summary>/.test(l)) return false;
-        if (/^<a id=/.test(l)) return false;
-        return true;
-      })
-      .join('\n')
+    var out = [];
+    var inCode = false;
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      // Drop fenced code blocks entirely — the <details>Source</details> dumps are pure
+      // syntax/variable-name noise that swamp the keyword profile with non-topic tokens.
+      if (/^\s*```/.test(l)) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      // Drop HTML wrappers, separators, and structural scaffolding lines.
+      if (l === '---') continue;
+      if (/^<\/?details>?/.test(l)) continue;
+      if (/^<summary>/.test(l)) continue;
+      if (/^<a id=/.test(l)) continue;
+      if (/^\s*\*\*\d+\s*lines?\*\*\s*\|/i.test(l)) continue;                                   // "**638 lines** | 4 functions/classes"
+      if (/^\s*#{2,4}\s+(Exports|Dependencies|Functions\s*&\s*Methods)\s*$/i.test(l)) continue; // structural headers
+      out.push(l);
+    }
+    // Strip markdown emphasis/heading/backtick punctuation so keywords come from words,
+    // not syntax; then collapse whitespace.
+    return out.join('\n')
+      .replace(/[`*#>]/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
@@ -229,9 +253,30 @@ var DocGenIngest = (function () {
     // not a demo-side copy that can silently drift from the library (see
     // agents/library-boundary.md). LuminalMemory.Chain is the exported library class.
     var chain = new LuminalMemory.Chain();
+    var fileToNodeId = {}; // filePath → its summary node id (first node created per file)
+    var built = [];
     for (var i = 0; i < nodes.length; i++) {
-      chain.append('system', nodes[i].content);
+      var created = chain.append('system', nodes[i].content);
+      built.push({ id: created.id, src: nodes[i] });
+      if (nodes[i].filePath && !fileToNodeId[nodes[i].filePath]) {
+        fileToNodeId[nodes[i].filePath] = created.id;
+      }
     }
+
+    // Deterministic dependency edges: each file → the files it imports from. This maps the
+    // real codebase wiring into the graph with zero LLM, so clusters form around actual
+    // modules (and edges here can trigger structural splits at ingest — that's intended).
+    var depEdges = 0;
+    for (var b = 0; b < built.length; b++) {
+      var deps = built[b].src.dependsOn;
+      if (!deps || !deps.length) continue;
+      for (var d = 0; d < deps.length; d++) {
+        var toId = fileToNodeId[deps[d]];
+        if (toId && toId !== built[b].id) { chain.link(built[b].id, toId); depEdges++; }
+      }
+    }
+    console.log('[Ingest] Built ' + chain.length + ' nodes, wired ' + depEdges + ' dependency edges');
+
     return { chain: chain.export() };
   }
 
