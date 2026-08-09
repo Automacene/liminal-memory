@@ -157,6 +157,9 @@ HANDOFF.md
 CODIE_UPDATE.md
 MERGE-CHECK.md
 
+# Local demo / test harness — kept locally, not part of the published library
+demo/
+
 # Memory state persistence
 data/
 

@@ -199,22 +199,6 @@ const results = memory.search("that thing we discussed about authentication");
 | OpenAI | `apiFormat: "openai"` |
 | Custom | `apiFormat: "custom"` + formatter functions |
 
-## Demo
-
-A full interactive demo is included with the project. It loads a prebuilt conversation, connects to your local model, and lets you test memory retrieval, tool use, trim/branch, and search — all in the browser.
-
-```bash
-git clone https://github.com/automacene/liminal-memory.git
-cd liminal-memory
-npm install
-npm run build:umd
-node serve.js
-```
-
-Then open `http://localhost:3000/demo/` in your browser.
-
-Make sure your LLM server is running with CORS enabled (e.g., `llama-server --port 8081 --cors`). The demo defaults to `http://127.0.0.1:8081` — edit the config at the top of `demo/ui/js/app.js` if your setup is different.
-
 ## Development
 
 ```bash
@@ -222,7 +206,6 @@ npm install
 npm run build        # ESM bundle
 npm run build:umd    # UMD bundle (browser)
 npm test             # 73 tests
-node serve.js        # Demo at http://localhost:3000/demo/
 ```
 
 ## License
