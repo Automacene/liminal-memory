@@ -137,7 +137,7 @@ export class Pocket {
 
   _emit(note) {
     for (const cb of this.listeners) {
-      try { cb(note); } catch (e) { /* swallow */ }
+      try { cb(note); } catch (e) { /* a listener throwing must not break the queue */ }
     }
   }
 }
