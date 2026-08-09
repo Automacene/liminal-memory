@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the floor declared in engines. 20 and 22 catch anything that only works on the
+        # newest runtime, which is easy to do by accident when developing on one version.
+        node: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Consumer typecheck
+        # Builds the declarations and compiles a real consumer against them. tsc emitting
+        # without error says nothing about whether the emitted types are usable, so this is
+        # the check that actually matters before publishing.
+        run: npm run test:types
+
+      - run: npm run build
+
+      - name: Package contents
+        run: npm pack --dry-run
+
+  publish:
+    # Tag a release with `git tag v1.2.3 && git push --tags` to publish.
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # Required for npm provenance, which links the published package back to the exact
+      # commit and workflow run that built it.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
