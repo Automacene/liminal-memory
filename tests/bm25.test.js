@@ -3,9 +3,10 @@ import assert from "node:assert";
 import { BM25, tokenize } from "../src/search/bm25.js";
 
 describe("BM25", () => {
-  it("tokenizes text into lowercase terms", () => {
-    const tokens = tokenize("Hello, World! This is a Test.");
-    assert.deepStrictEqual(tokens, ["hello", "world", "this", "is", "a", "test"]);
+  it("tokenizes to lowercase, punctuation-stripped, stemmed terms", () => {
+    // tokenize now also stems, so the index matches queries (which are stemmed too).
+    const tokens = tokenize("Running Indexes, Quickly!");
+    assert.deepStrictEqual(tokens, ["run", "index", "quickly"]);
   });
 
   it("indexes and searches nodes", () => {
