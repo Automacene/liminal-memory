@@ -224,42 +224,15 @@ var DocGenIngest = (function () {
    * Build a minimal memory state JSON from an array of nodes.
    */
   function buildStateFromNodes(nodes) {
-    var chainNodes = [];
+    // Build the nodes THROUGH the library's Chain so keyword extraction, graph init,
+    // ids/parenting, and token counts all come from one place (src/core/chain.js) —
+    // not a demo-side copy that can silently drift from the library (see
+    // agents/library-boundary.md). LuminalMemory.Chain is the exported library class.
+    var chain = new LuminalMemory.Chain();
     for (var i = 0; i < nodes.length; i++) {
-      var content = nodes[i].content;
-      chainNodes.push({
-        id: i + 1,
-        parentId: i,
-        role: 'system',
-        content: content,
-        timestamp: Date.now(),
-        metadata: {},
-        keywords: extractNodeKeywords(content),
-        graph: { edges_to: [], edges_from: [] }
-      });
+      chain.append('system', nodes[i].content);
     }
-    return {
-      chain: { nodes: chainNodes, nextId: chainNodes.length + 1 }
-    };
-  }
-
-  /**
-   * Extract keywords from node content — same logic as the library's chain.js
-   */
-  function extractNodeKeywords(content) {
-    var stopwords = ['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','could','should','might','shall','can','may','must','need','this','that','these','those','which','what','who','whom','where','when','why','how','not','no','nor','but','and','or','if','then','else','than','too','very','just','about','all','also','any','because','before','between','both','by','each','few','for','from','further','here','in','into','its','more','most','of','on','once','only','other','out','over','own','same','so','some','such','their','them','there','through','to','under','until','up','us','we','with','you','your','our','it','they','he','she','him','her','his','my','me','i','am','at','as'];
-    var text = (typeof content === 'string') ? content : JSON.stringify(content);
-    var words = text.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(function (w) { return w.length >= 3 && stopwords.indexOf(w) === -1; });
-    // Deduplicate
-    var seen = {};
-    var unique = [];
-    for (var k = 0; k < words.length; k++) {
-      if (!seen[words[k]]) { seen[words[k]] = true; unique.push(words[k]); }
-    }
-    return unique;
+    return { chain: chain.export() };
   }
 
   return { init: init };
