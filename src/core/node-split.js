@@ -51,6 +51,11 @@ export function maybeSplit(chain, hub) {
     // Each category takes its half of the original children as members.
     for (const m of groupA) chain._rawLink(catA, m);
     for (const m of groupB) chain._rawLink(catB, m);
+
+    console.log(
+      `[Split] Node ${hub.id} overflowed (${members.length} children) → ` +
+      `"${catA.content}" (${groupA.length}) + "${catB.content}" (${groupB.length})`
+    );
   } finally {
     chain._splitting = false;
   }
