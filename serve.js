@@ -619,14 +619,21 @@ server.listen(PORT, () => {
   console.log(`    POST /api/control/refresh              — reload the UI`);
   console.log(`    POST /api/control/prompt  {"text":"…"} — send a prompt to Sovereign\n`);
 
-  // Auto-open the demo in the default browser so it's not easy to miss.
-  const openCommand = process.platform === "win32" ? `start "" "${demoUrl}"`
-    : process.platform === "darwin" ? `open "${demoUrl}"`
-    : `xdg-open "${demoUrl}"`;
+  // Auto-open the demo in the default browser so it's not easy to miss — but only
+  // for a human running `npm run demo` directly. Set LM_NO_OPEN=1 to suppress it
+  // (e.g. when Claude drives the demo through the Browser pane, so a second system
+  // browser doesn't also connect and double every control-channel prompt).
+  if (process.env.LM_NO_OPEN === "1") {
+    console.log(`  (LM_NO_OPEN=1 — not auto-opening a browser; open ${demoUrl} yourself if needed)\n`);
+  } else {
+    const openCommand = process.platform === "win32" ? `start "" "${demoUrl}"`
+      : process.platform === "darwin" ? `open "${demoUrl}"`
+      : `xdg-open "${demoUrl}"`;
 
-  exec(openCommand, (err) => {
-    if (err) console.log(`  (Could not auto-open a browser — open ${demoUrl} manually)\n`);
-  });
+    exec(openCommand, (err) => {
+      if (err) console.log(`  (Could not auto-open a browser — open ${demoUrl} manually)\n`);
+    });
+  }
 });
 
 // Graceful shutdown
