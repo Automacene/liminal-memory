@@ -32,9 +32,12 @@ export class LuminalMemory {
     this.bm25 = new BM25(this.config.bm25);
     this.bloom = new BloomFilter(this.config.bloom);
     this.tfidf = new TfIdf();
-    this.archive = new Archive();
+    // Pluggable connection points — pass your own to override, omit for the built-in default.
+    // Storage backend: must implement init/store/retrieve/delete (see src/storage/archive.js).
+    this.archive = userConfig.storageAdapter || new Archive();
     this.memoryManager = new MemoryManager(this.chain, this.config);
-    this.transport = new LLMTransport(this.config);
+    // Model transport: must implement complete(messages) and generateSummary(nodes).
+    this.transport = userConfig.transport || new LLMTransport(this.config);
     this.compaction = new Compaction(
       this.chain, this.bm25, this.bloom, this.tfidf, this.archive, this.config
     );
