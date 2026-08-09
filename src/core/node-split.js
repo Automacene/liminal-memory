@@ -65,6 +65,16 @@ export function maybeSplit(chain, hub) {
     for (const m of groupA) chain._rawLink(catA, m);
     for (const m of groupB) chain._rawLink(catB, m);
 
+    // Off-hot-path naming: if a custom namer is plugged in, just record these two new category
+    // nodes for later renaming — a cheap push, no naming work here. Their instant keyword names
+    // are already set above, so the split stays fast and fully deterministic regardless.
+    if (chain.recordCategoryNaming) {
+      chain.pendingCategoryNaming.push(
+        { categoryId: catA.id, memberIds: groupA.map(m => m.id) },
+        { categoryId: catB.id, memberIds: groupB.map(m => m.id) }
+      );
+    }
+
     console.log(
       `[Split] Node ${hub.id} overflowed (${members.length} children) → ` +
       `"${catA.content}" (${groupA.length}) + "${catB.content}" (${groupB.length})`
