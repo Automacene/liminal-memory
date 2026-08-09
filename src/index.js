@@ -41,6 +41,11 @@ export class LuminalMemory {
     // Summarizer: writes the summary for an archived block. Must implement generateSummary(nodes).
     // Defaults to the transport, so swapping the model swaps summaries too — unless overridden here.
     this.summarizer = userConfig.summarizer || this.transport;
+    // Node namer: gives split category nodes nicer names, OFF the hot path. A function
+    // (memberNodes, ctx) => { label?, keywords? } | null. Default = keep the instant keyword name.
+    // When supplied, splits queue their new category nodes for renaming via enrichCategoryNames().
+    this.nodeNamer = userConfig.nodeNamer || null;
+    if (this.nodeNamer) this.chain.recordCategoryNaming = true;
     this.compaction = new Compaction(
       this.chain, this.bm25, this.bloom, this.tfidf, this.archive, this.config
     );
@@ -431,6 +436,39 @@ export class LuminalMemory {
   async restore(archiveKey) {
     if (!this._initialized) await this.init();
     return this.compaction.restore(archiveKey);
+  }
+
+  /**
+   * Upgrade the names of category nodes created by recent splits, using the plugged-in nodeNamer.
+   * This runs OFF the hot path — call it after a turn, on idle, or on demand. The split itself
+   * only ever sets the instant keyword name and queues the node here; the (possibly slow) namer
+   * runs only in this method, so it can never block a split or recall. No-op if no nodeNamer was
+   * supplied or the queue is empty.
+   * @returns {Promise<number>} how many category nodes were renamed
+   */
+  async enrichCategoryNames() {
+    if (!this.nodeNamer) return 0;
+    const queue = this.chain.pendingCategoryNaming;
+    if (!queue || queue.length === 0) return 0;
+
+    const pending = queue.splice(0, queue.length); // drain and clear
+    let renamed = 0;
+    for (const { categoryId, memberIds } of pending) {
+      const categoryNode = this.chain.get(categoryId);
+      if (!categoryNode) continue; // may have been re-split or archived since
+      const memberNodes = memberIds.map(id => this.chain.get(id)).filter(Boolean);
+      try {
+        const result = await this.nodeNamer(memberNodes, { categoryNode });
+        if (result && result.label) categoryNode.content = result.label;
+        if (result && Array.isArray(result.keywords) && result.keywords.length) {
+          categoryNode.keywords = result.keywords;
+        }
+        if (result && (result.label || result.keywords)) renamed++;
+      } catch (e) {
+        console.warn(`[NodeNamer] failed to name category ${categoryId}: ${e.message}`);
+      }
+    }
+    return renamed;
   }
 
   /**

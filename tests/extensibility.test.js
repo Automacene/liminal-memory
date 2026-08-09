@@ -39,6 +39,56 @@ describe("Extensibility — pluggable connection points", () => {
     });
   });
 
+  describe("node namer (hot-path safe)", () => {
+    // Two clear clusters so the hub splits into two category nodes.
+    function triggerSplit(mem) {
+      const hub = mem.chain.append("system", "hub central node");
+      const kids = [
+        mem.chain.append("system", "cats dogs pets animals furry companions"),
+        mem.chain.append("system", "dogs animals veterinary care pets"),
+        mem.chain.append("system", "pets animals cats grooming furry"),
+        mem.chain.append("system", "database sql queries indexing storage"),
+        mem.chain.append("system", "sql database transactions rollback"),
+        mem.chain.append("system", "indexing database performance sql tuning")
+      ];
+      kids.forEach(k => mem.chain.link(hub.id, k.id));
+    }
+
+    it("default: no namer — instant keyword names, nothing queued, enrich is a no-op", async () => {
+      const mem = new LuminalMemory();
+      assert.strictEqual(mem.chain.recordCategoryNaming, false);
+      triggerSplit(mem);
+
+      const cats = mem.chain.all().filter(n => n.role === "category");
+      assert.ok(cats.length >= 2, "the hub split into category nodes");
+      assert.ok(cats.every(c => c.content && c.content.length > 0), "each has an instant keyword name");
+      assert.strictEqual(mem.chain.pendingCategoryNaming.length, 0, "nothing queued without a namer");
+      assert.strictEqual(await mem.enrichCategoryNames(), 0, "enrich is a no-op with no namer");
+    });
+
+    it("with a namer: split never calls it (stays fast); enrichCategoryNames upgrades off-path", async () => {
+      let totalCalls = 0;
+      const namer = async (memberNodes) => { totalCalls++; return { label: "NICE:" + memberNodes.length }; };
+
+      const mem = new LuminalMemory({ nodeNamer: namer });
+      assert.strictEqual(mem.chain.recordCategoryNaming, true, "recording turns on when a namer is supplied");
+
+      triggerSplit(mem);
+
+      // The hot-path proof: the namer was NOT called during the split itself.
+      assert.strictEqual(totalCalls, 0, "namer must not run inline on the split hot path");
+      assert.ok(mem.chain.pendingCategoryNaming.length >= 2, "category nodes were queued for later naming");
+
+      // Off the hot path, the namer runs and upgrades the names.
+      const renamed = await mem.enrichCategoryNames();
+      assert.ok(renamed >= 2, "enrichCategoryNames renamed the queued category nodes");
+      assert.strictEqual(totalCalls, renamed, "namer called exactly once per queued category");
+      const cats = mem.chain.all().filter(n => n.role === "category");
+      assert.ok(cats.some(c => c.content.startsWith("NICE:")), "a category node got the plugged-in name");
+      assert.strictEqual(mem.chain.pendingCategoryNaming.length, 0, "queue drained after enrich");
+    });
+  });
+
   describe("summarizer", () => {
     it("defaults to the transport when none is supplied", () => {
       const mem = new LuminalMemory();
