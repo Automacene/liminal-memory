@@ -1,21 +1,13 @@
 /**
- * Conservative stemmer — collapses the common inflected forms of a word to a shared stem so
- * related nodes match even when they used different endings ("index" / "indexing" / "indexed").
+ * Conservative stemmer — collapses common inflected forms to a shared stem so related nodes match
+ * across different endings ("index"/"indexing"/"indexed"). Deliberately gentle (only -s/-es/-ies,
+ * -ing, -ed with length guards, never short words): in a memory graph a false match silently
+ * pollutes recall, so we accept missing a few variants over an aggressive stemmer's wrong merges
+ * ("universe"/"university"). Pure, deterministic, idempotent.
  *
- * Deliberately GENTLE, not a full Porter/Snowball: it only trims the high-frequency inflections
- * (plural -s/-es/-ies, gerund -ing, past -ed) with length guards, and never touches short words.
- * The trade-off is intentional — in a memory graph a *false* match silently pollutes recall and
- * clustering, so we accept missing a few variants ("archive" vs "archived") to avoid merging
- * unrelated words the way an aggressive stemmer does ("universe"/"university" → "univers").
- *
- * Pure, deterministic, no dependencies — safe to call on the recall hot path. Idempotent:
- * stem(stem(w)) === stem(w), so it's harmless to apply more than once.
- *
- * MUST be applied identically everywhere terms are produced (node keyword extraction, BM25
- * indexing + query parsing, retrieval tokenizing) — stemming the index but not the query, or
- * vice-versa, silently breaks matching.
- *
- * @param {string} term - a single already-lowercased-or-not token
+ * MUST be applied identically everywhere terms are produced (node keywords, BM25 index + query,
+ * retrieval tokenizing) — stemming one side but not the other silently breaks matching.
+ * @param {string} term
  * @returns {string} the stemmed term
  */
 export function stem(term) {

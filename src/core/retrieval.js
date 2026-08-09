@@ -64,7 +64,6 @@ export class Retrieval {
         for (const node of activeNodes) {
           this.chain.link(currentNodeId, node.id);
         }
-        console.log(`[Graph] Node ${currentNodeId} edges_to ${activeNodes.length} recalled nodes`);
       }
       return { nodes: activeNodes, deepResponse: null };
     }
@@ -161,12 +160,6 @@ export class Retrieval {
       })
       .slice(0, maxRetrievedNodes * 2);
 
-    if (hopById.size > seedIds.length) {
-      console.log(
-        `[Graph:Expand] BM25 found ${seedIds.length} → ${hopById.size} candidates ` +
-        `via ${linkDistance}-hop traversal → kept best ${ranked.length} by relevance`
-      );
-    }
     return ranked;
   }
 

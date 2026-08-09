@@ -116,6 +116,32 @@ memory.registerTool(new Tool({
 }));
 ```
 
+## Bring Your Own Parts
+
+Liminal ships sensible defaults, but every moving part is swappable — hand your own to the constructor, or omit it for the built-in:
+
+```javascript
+const memory = new LiminalMemory({
+  endpoint: "http://127.0.0.1:8081",
+
+  // Where memories are saved (default: IndexedDB in the browser, in-memory in Node)
+  storageAdapter: myAdapter,   // { init(), store(key, nodes), retrieve(key), delete(key) }
+
+  // How it talks to the model (default: built-in HTTP transport)
+  transport: myTransport,      // { complete(messages), generateSummary(nodes) }
+
+  // Who summarizes archived blocks (default: the transport)
+  summarizer: mySummarizer,    // { generateSummary(nodes) }
+
+  // How split category nodes get named (default: top keyword)
+  nodeNamer: async (members, ctx) => ({ label: "Retrieval Pipeline" })
+});
+```
+
+Pass none of them and it behaves exactly like the quick-start above. Same spirit as `registerTool` — the library gives you the connection points and stays out of your architecture.
+
+**The node namer runs off the hot path.** Naming happens during a split, which must stay fast, so the library never waits on your namer: it sets an instant keyword name and, if you supplied a namer, queues the node. Call `await memory.enrichCategoryNames()` after a turn to fill in nicer names (e.g. from an NLP model) without ever blocking a split or a recall.
+
 ## Memory Management
 
 Liminal calls this **Trim & Branch** — not compaction in the traditional database sense.

@@ -45,7 +45,6 @@ export function createWebSearchTool(config = {}) {
 
       // Kill switch — check config flag
       if (memoryConfig && memoryConfig.webSearchEnabled === false) {
-        console.log('[WebSearch] Disabled (webSearchEnabled: false)');
         return { result: { results: [], query }, formatted: "Web search is currently disabled." };
       }
       // Show searching modal so user knows not to interact
@@ -101,7 +100,7 @@ export function createWebSearchTool(config = {}) {
               }
             }
           } catch (e) {
-            console.log('[WebSearch] Fetch failed for ' + result.url + ': ' + e.message);
+            // skip this result, continue with the others
           }
 
           // Respectful delay between fetches (3-5 seconds)
