@@ -159,3 +159,6 @@ MERGE-CHECK.md
 
 # Memory state persistence
 data/
+
+# Generated DocGen output (build artifact, regenerated on demand)
+DOCUMENTATION.md
