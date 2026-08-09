@@ -1,12 +1,12 @@
 /**
- * LUMINAL MEMORY — Demo Application Interface
+ * LIMINAL MEMORY — Demo Application Interface
  * ================================================================
  * Entry point for understanding the entire demo/ folder.
  * AI agents: read this file FIRST when working on anything in demo/.
  *
  * WHAT IS THIS DEMO?
  * ----------------------------------------------------------------
- * A single-page browser app that showcases the Luminal Memory library.
+ * A single-page browser app that showcases the Liminal Memory library.
  * It loads a prebuilt conversation fixture, connects to a local LLM
  * (llama.cpp or Ollama), and provides a full chat UI with:
  *   - Real-time BM25 recall from conversation history
@@ -61,13 +61,13 @@
  *
  * KEY DEPENDENCIES:
  * ----------------------------------------------------------------
- * - dist/luminal-memory.umd.js — The library (loaded as UMD global: window.LuminalMemory)
+ * - dist/liminal-memory.umd.js — The library (loaded as UMD global: window.LiminalMemory)
  * - marked.js (CDN)            — Markdown rendering for assistant messages
  * - gifuct-js (vendored)       — GIF frame extraction for canvas background
  *
  * CONFIGURATION:
  * ----------------------------------------------------------------
- * The demo passes minimal overrides to LuminalMemory constructor:
+ * The demo passes minimal overrides to LiminalMemory constructor:
  *   { endpoint, apiFormat, completionPath, model, thinking, ... }
  * After construction, CONFIG = memory.config (the merged result).
  * All settings are editable live via the Settings modal (gear icon in topbar).

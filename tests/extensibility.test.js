@@ -1,13 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { LuminalMemory } from "../src/index.js";
+import { LiminalMemory } from "../src/index.js";
 import { Archive } from "../src/storage/archive.js";
 import { LLMTransport } from "../src/transport/llm.js";
 
 describe("Extensibility — pluggable connection points", () => {
   describe("storage adapter", () => {
     it("defaults to the built-in Archive when none is supplied", () => {
-      const mem = new LuminalMemory();
+      const mem = new LiminalMemory();
       assert.ok(mem.archive instanceof Archive, "falls back to the built-in Archive");
     });
 
@@ -22,7 +22,7 @@ describe("Extensibility — pluggable connection points", () => {
         async delete(key) { calls.push("delete"); stored.delete(key); }
       };
 
-      const mem = new LuminalMemory({ storageAdapter: fakeAdapter });
+      const mem = new LiminalMemory({ storageAdapter: fakeAdapter });
       assert.strictEqual(mem.archive, fakeAdapter, "the supplied adapter is wired in");
 
       // Drive a real archive through the real compaction path — it must hit OUR adapter.
@@ -55,7 +55,7 @@ describe("Extensibility — pluggable connection points", () => {
     }
 
     it("default: no namer — instant keyword names, nothing queued, enrich is a no-op", async () => {
-      const mem = new LuminalMemory();
+      const mem = new LiminalMemory();
       assert.strictEqual(mem.chain.recordCategoryNaming, false);
       triggerSplit(mem);
 
@@ -70,7 +70,7 @@ describe("Extensibility — pluggable connection points", () => {
       let totalCalls = 0;
       const namer = async (memberNodes) => { totalCalls++; return { label: "NICE:" + memberNodes.length }; };
 
-      const mem = new LuminalMemory({ nodeNamer: namer });
+      const mem = new LiminalMemory({ nodeNamer: namer });
       assert.strictEqual(mem.chain.recordCategoryNaming, true, "recording turns on when a namer is supplied");
 
       triggerSplit(mem);
@@ -91,13 +91,13 @@ describe("Extensibility — pluggable connection points", () => {
 
   describe("summarizer", () => {
     it("defaults to the transport when none is supplied", () => {
-      const mem = new LuminalMemory();
+      const mem = new LiminalMemory();
       assert.strictEqual(mem.summarizer, mem.transport, "summaries ride on the transport by default");
     });
 
     it("uses a supplied summarizer to write archive summaries", async () => {
       let called = false;
-      const mem = new LuminalMemory({
+      const mem = new LiminalMemory({
         storageAdapter: { async init() {}, async store() {}, async retrieve() { return []; }, async delete() {} },
         summarizer: {
           async generateSummary(nodes) {
@@ -119,7 +119,7 @@ describe("Extensibility — pluggable connection points", () => {
 
   describe("model transport", () => {
     it("defaults to the built-in LLMTransport when none is supplied", () => {
-      const mem = new LuminalMemory();
+      const mem = new LiminalMemory();
       assert.ok(mem.transport instanceof LLMTransport, "falls back to the built-in transport");
     });
 
@@ -130,7 +130,7 @@ describe("Extensibility — pluggable connection points", () => {
         async generateSummary(nodes) { return { startTopic: "canned", keyDecisions: [], openThreads: [] }; }
       };
 
-      const mem = new LuminalMemory({ transport: fakeTransport });
+      const mem = new LiminalMemory({ transport: fakeTransport });
       assert.strictEqual(mem.transport, fakeTransport, "the supplied transport is wired in");
 
       const out = await mem.transport.complete([{ role: "user", content: "hi" }]);

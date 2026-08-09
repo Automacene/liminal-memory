@@ -1,5 +1,5 @@
 /**
- * LUMINAL MEMORY — Demo UI Interface
+ * LIMINAL MEMORY — Demo UI Interface
  * ================================================================
  * Top-level manifest for the entire demo UI layer.
  * AI agents: read this file to understand the full demo structure.
@@ -28,16 +28,16 @@
  * HOW IT WORKS:
  * ----------------------------------------------------------------
  * 1. index.html loads css/index.css (one stylesheet import)
- * 2. index.html loads the UMD library bundle (dist/luminal-memory.umd.js)
+ * 2. index.html loads the UMD library bundle (dist/liminal-memory.umd.js)
  * 3. index.html loads a fixture module (demo/fixtures/knowledge-base.js)
  * 4. index.html loads all JS scripts from js/internal/ in order
- * 5. app.js boots: creates LuminalMemory instance, loads fixture, wires UI
+ * 5. app.js boots: creates LiminalMemory instance, loads fixture, wires UI
  *
  * KEY CONCEPTS:
  * ----------------------------------------------------------------
  * - All JS is plain scripts (no ES modules in UI) — globals communicate
- * - The library is an ES module bundled to UMD (window.LuminalMemory)
- * - The demo CONFIG is passed to LuminalMemory, then reassigned to memory.config
+ * - The library is an ES module bundled to UMD (window.LiminalMemory)
+ * - The demo CONFIG is passed to LiminalMemory, then reassigned to memory.config
  *   so there's one source of truth for all settings
  * - Settings modal dynamically detects backends (llama.cpp + Ollama) and
  *   builds sampling controls from whatever the server reports

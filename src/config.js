@@ -1,5 +1,5 @@
 /**
- * Default configuration for Luminal Memory.
+ * Default configuration for Liminal Memory.
  */
 export const defaultConfig = {
 
