@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outFile": "dist/index.d.ts",
+    "module": "amd",
+    "target": "es2022",
+    "moduleResolution": "classic",
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js"]
+}
