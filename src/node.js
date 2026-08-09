@@ -42,10 +42,10 @@
  * @param {object} [params.tags]
  * @param {object} [params.graph]
  * @param {object} [params.metadata]  merged over `createdAt`/`updatedAt`
- * @param {number} params.at  epoch ms for both timestamps
+ * @param {number} params.observedAt  epoch ms for both timestamps
  * @returns {Node}
  */
-export function createNode({ id, pool, content, tags, graph, metadata, at }) {
+export function createNode({ id, pool, content, tags, graph, metadata, observedAt }) {
   if (content === undefined) {
     throw new Error("[liminal] content is required (pass null if the node genuinely has none)");
   }
@@ -56,7 +56,7 @@ export function createNode({ id, pool, content, tags, graph, metadata, at }) {
     content,
     tags: tags ?? {},
     graph: graph ?? {},
-    metadata: { createdAt: at, updatedAt: at, ...metadata }
+    metadata: { createdAt: observedAt, updatedAt: observedAt, ...metadata }
   };
 }
 
@@ -72,13 +72,13 @@ export function createNode({ id, pool, content, tags, graph, metadata, at }) {
  *
  * @param {Node} node
  * @param {{content?: *, tags?: object, graph?: object, metadata?: object}} patch
- * @param {number} at  epoch ms written to `updatedAt`
+ * @param {number} observedAt  epoch ms written to `updatedAt`
  * @returns {Node}
  */
-export function patchNode(node, patch, at) {
+export function patchNode(node, patch, observedAt) {
   const next = {
     ...node,
-    metadata: { ...node.metadata, ...patch.metadata, updatedAt: at }
+    metadata: { ...node.metadata, ...patch.metadata, updatedAt: observedAt }
   };
 
   if ("content" in patch) next.content = patch.content;
