@@ -15,74 +15,105 @@ export class Compaction {
   }
 
   /**
-   * Trim a range of nodes from active memory into cold storage.
+   * Trim a CONTIGUOUS range of nodes from active memory into cold storage.
    * @param {number} startId - first node to archive
    * @param {number} endId - last node to archive
    * @param {object} summary - { startTopic, keyDecisions, openThreads }
    * @returns {object} the compaction marker node
    */
   async trim(startId, endId, summary) {
-    // Extract nodes to archive
     const nodesToArchive = this.chain.range(startId, endId);
     if (nodesToArchive.length === 0) {
       throw new Error(`No nodes found in range ${startId}-${endId}`);
     }
+    return this._archiveNodes(nodesToArchive, `archive_${startId}_${endId}`, summary);
+  }
 
+  /**
+   * Archive an arbitrary, possibly NON-CONTIGUOUS set of node IDs as a single cold-storage
+   * block — the sibling of trim() for topic clusters, which rarely occupy a contiguous ID
+   * range (a recurring subject can surface at turn 12, 40, and 90). Resolves the ids to nodes
+   * (deduped, skipping ids that don't exist and any existing compaction marker), archives the
+   * exact set as one block with one summary marker, and works regardless of where those nodes
+   * sit chronologically in the chain.
+   * @param {number[]} nodeIds - the exact set of node ids to archive, any order
+   * @param {object} [summary] - { startTopic, keyDecisions, openThreads }
+   * @returns {object} the compaction marker node
+   */
+  async trimSet(nodeIds, summary) {
+    const seen = new Set();
+    const nodes = [];
+    for (const id of nodeIds || []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = this.chain.get(id);
+      if (node && node.role !== "compaction") nodes.push(node);
+    }
+    if (nodes.length === 0) {
+      throw new Error("No archivable nodes found for the given id set");
+    }
+    // Sort by id so the archived text, summary, and key are deterministic regardless of the
+    // order ids were passed in.
+    nodes.sort((a, b) => a.id - b.id);
+
+    const sortedIds = nodes.map(n => n.id);
+    // Key is unique by construction (it IS the set), and lets restore() find its block.
+    const archiveKey = `archive_set_${sortedIds.join("_")}`;
+    return this._archiveNodes(nodes, archiveKey, summary, { nodeIds: sortedIds });
+  }
+
+  /**
+   * Shared archiving primitive for trim()/trimSet(): index the block (tf-idf + bloom), store it
+   * in cold storage, drop the nodes from active memory + the BM25 index, and leave a single
+   * compaction marker in the chain. The only things that differ between contiguous and set
+   * archiving are *which* nodes and the *archive key* — those are chosen by the caller; this
+   * owns everything downstream so the two entry points can't drift.
+   * @param {object[]} nodes - the exact nodes to archive
+   * @param {string} archiveKey - unique cold-storage key
+   * @param {object} summary - { startTopic, keyDecisions, openThreads }
+   * @param {object} [extraMeta] - extra marker metadata (e.g. { nodeIds } for a set)
+   * @returns {object} the compaction marker node
+   */
+  async _archiveNodes(nodes, archiveKey, summary, extraMeta = {}) {
     // Concatenate all content for indexing
-    const fullText = nodesToArchive.map(n => n.content).join(" ");
+    const fullText = nodes.map(n => n.content).join(" ");
 
-    // Compute TF-IDF vector for this block
+    // Compute TF-IDF vector + register, add terms to bloom
     const vector = this.tfidf.computeVector(fullText);
     this.tfidf.registerBlock(fullText);
-
-    // Add terms to bloom filter
     const bloomTermCount = this.bloom.addText(fullText);
 
     // Compress and store in cold storage
-    const archiveKey = `archive_${startId}_${endId}`;
-    await this.archive.store(archiveKey, nodesToArchive);
+    await this.archive.store(archiveKey, nodes);
 
-    // Create compaction marker
-    const marker = {
-      id: endId + 0.5, // will be positioned after endId in the chain
-      parentId: startId > 1 ? startId - 1 : 0,
-      role: "compaction",
-      content: "",
-      timestamp: Date.now(),
-      tokenCount: 0,
-      metadata: {
-        type: "compaction",
-        startNode: startId,
-        endNode: endId,
-        nodeCount: nodesToArchive.length,
-        summary: summary || { startTopic: "", keyDecisions: [], openThreads: [] },
-        archiveKey,
-        tfidfVector: TfidfSerialize(vector),
-        bloomTerms: bloomTermCount
-      }
+    const ids = nodes.map(n => n.id);
+    const startNode = Math.min(...ids);
+    const endNode = Math.max(...ids);
+
+    const metadata = {
+      type: "compaction",
+      startNode,
+      endNode,
+      nodeCount: nodes.length,
+      summary: summary || { startTopic: "", keyDecisions: [], openThreads: [] },
+      archiveKey,
+      tfidfVector: TfidfSerialize(vector),
+      bloomTerms: bloomTermCount,
+      ...extraMeta
     };
 
-    // Assign a real integer ID for the marker
-    marker.id = this.chain.nextId;
-
-    // Remove archived nodes from memory
-    const removed = this.chain.remove(startId, endId);
-
-    // Remove from BM25 index
-    for (const node of removed) {
+    // Remove archived nodes from active memory + the BM25 index (per-id, so it works for a
+    // non-contiguous set exactly as it does for a range).
+    for (const node of nodes) {
+      this.chain.removeById(node.id);
       this.bm25.remove(node.id);
     }
 
-    // Insert compaction marker into chain
-    this.chain.append("compaction", "", marker.metadata);
+    // Insert the compaction marker into the chain (appended at the tail, real integer id).
+    const marker = this.chain.append("compaction", "", metadata);
 
-    // Track the marker
-    this.markers.push({
-      archiveKey,
-      startNode: startId,
-      endNode: endId,
-      vector
-    });
+    // Track the marker for retrieval ranking
+    this.markers.push({ archiveKey, startNode, endNode, vector });
 
     return marker;
   }
