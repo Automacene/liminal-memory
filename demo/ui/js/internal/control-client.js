@@ -26,7 +26,7 @@
     try { text = JSON.parse(e.data).text || ''; } catch (err) { /* ignore malformed */ }
     if (!text) return;
     console.log('[Control] Prompt received → dispatching to Sovereign: "' + text + '"');
-    window.dispatchEvent(new CustomEvent('luminal:remote-prompt', { detail: { text: text } }));
+    window.dispatchEvent(new CustomEvent('liminal:remote-prompt', { detail: { text: text } }));
   });
 
   // EventSource auto-reconnects (including after location.reload); nothing to handle.

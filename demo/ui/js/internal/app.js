@@ -1,5 +1,5 @@
 /**
- * Luminal Memory — Main App Controller
+ * Liminal Memory — Main App Controller
  * Initializes the engine, loads fixtures, wires UI components.
  * Delegates heavy logic to: sovereign-loop.js, mock-responses.js
  *
@@ -55,9 +55,9 @@
   }
 
   // === State ===
-  var memory = new LuminalMemory.LuminalMemory(CONFIG);
+  var memory = new LiminalMemory.LiminalMemory(CONFIG);
   CONFIG = memory.config;
-  window._luminalMemory = memory;
+  window._liminalMemory = memory;
   var ready = false;
   var llmAvailable = false;
   var _pendingRemotePrompt = null; // holds a control-channel prompt that arrived pre-init
@@ -71,7 +71,7 @@
   };
 
   // === Auto-Save / Restore ===
-  var SAVE_KEY = 'luminal-memory-state';
+  var SAVE_KEY = 'liminal-memory-state';
 
   async function autoSave() {
     try {
@@ -272,7 +272,7 @@
 
     // Dev control channel (control-client.js → serve.js): allow remote prompt injection.
     // If a prompt lands before init finishes, hold the latest and fire it once ready.
-    window.addEventListener('luminal:remote-prompt', function (e) {
+    window.addEventListener('liminal:remote-prompt', function (e) {
       var text = e && e.detail && e.detail.text;
       if (!text) return;
       if (ready) {
@@ -292,14 +292,14 @@
     });
 
     // Register Ephemeral Mind tool
-    var ephemeralMind = LuminalMemory.createEphemeralMindTool({
+    var ephemeralMind = LiminalMemory.createEphemeralMindTool({
       transport: memory.transport,
       memoryConfig: CONFIG
     });
     memory.registerTool(ephemeralMind);
 
     // Register Web Search tool
-    var webSearch = LuminalMemory.createWebSearchTool({ maxResults: 3, memoryConfig: CONFIG });
+    var webSearch = LiminalMemory.createWebSearchTool({ maxResults: 3, memoryConfig: CONFIG });
     memory.registerTool(webSearch);
 
     console.log('[Init] Tools registered: ephemeral_mind (llm), web_search (bm25)');
@@ -462,7 +462,7 @@
       }
 
       // Recall — delegated to the library's retrieval engine (src/core/retrieval.js),
-      // the SAME path LuminalMemory.chat() uses: BM25 recall + N-hop graph expansion +
+      // the SAME path LiminalMemory.chat() uses: BM25 recall + N-hop graph expansion +
       // relevance ranking + edge creation from this turn to whatever it recalls. The demo
       // used to re-implement all of this inline; it now calls the library so it exercises
       // the real code on every turn and can't silently drift from it (ROADMAP.md Phase 1.5).
