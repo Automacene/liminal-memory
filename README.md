@@ -24,7 +24,9 @@ The core idea is simple: instead of letting the model accumulate context until i
 
 **The sliding window** — each turn, the last N messages get sent to the model as its "working memory." This is what the AI actually sees.
 
-**Retrieval** — when you reference something outside the window ("what was that code we wrote earlier?"), the system finds it using keyword search algorithms (BM25, Bloom filters, TF-IDF) and injects it back into the prompt. No neural network needed — just math. Sub-millisecond.
+**Retrieval** — when you reference something outside the window ("what was that code we wrote earlier?"), the system finds it using keyword search algorithms (BM25, Bloom filters, TF-IDF) and injects it back into the prompt. No neural network needed — just math. Sub-millisecond. Terms are conservatively stemmed, so "index" / "indexing" / "indexed" all match.
+
+**Self-organizing graph** — nodes link to each other as they get recalled together, and when a cluster of related nodes grows dense enough it automatically splits off into a labeled "category" node. The graph builds its own topic structure through use — no embeddings, no manual tagging. (Category names default to the top shared keyword; you can plug in your own namer — see *Bring Your Own Parts*.)
 
 **Tools** — capabilities like web search are registered with descriptions. When your query matches a tool's description, it gets activated for that turn. The AI decides whether to use it, calls it, and the results feed into its response.
 
@@ -154,6 +156,7 @@ Liminal calls this **Trim & Branch** — not compaction in the traditional datab
 
 - **Trim** — you pick two points in the conversation. Everything between them stays active. Everything before and after gets archived. You're saying "this is the relevant section right now."
 - **Branch** — you pick one point. Everything before it archives. You're saying "start fresh from here."
+- **Trim a set** — `trimSet([ids])` archives an arbitrary, *non-contiguous* set of nodes as a single block — for a topic that surfaced at turns 12, 40, and 90 rather than one clean range.
 - **Archives are searchable** — the Bloom filter knows which terms exist in which archive block. TF-IDF vectors rank which block is most relevant to a query. When retrieval needs old context, it decompresses only the matching block, runs BM25 inside it, and injects the exact nodes.
 - **Archives are restorable** — `memory.restore(key)` brings a block back into active memory. Nothing is ever permanently lost.
 
@@ -171,6 +174,9 @@ Liminal calls this **Trim & Branch** — not compaction in the traditional datab
 ```javascript
 // Trim: select what to KEEP, everything else archives
 await memory.trimKeepRange({ keepStart: 10, keepEnd: 30 });
+
+// Trim a scattered set of nodes as one block
+await memory.trimSet([12, 40, 90]);
 
 // Branch: archive everything before a point
 await memory.branchFrom(15);
@@ -215,7 +221,7 @@ Make sure your LLM server is running with CORS enabled (e.g., `llama-server --po
 npm install
 npm run build        # ESM bundle
 npm run build:umd    # UMD bundle (browser)
-npm test             # 47 tests
+npm test             # 73 tests
 node serve.js        # Demo at http://localhost:3000/demo/
 ```
 
@@ -230,28 +236,41 @@ Apache 2.0 © Automacene
 
 ```javascript
 const memory = new LiminalMemory({
-  endpoint: "http://127.0.0.1:8081",
-  apiFormat: "openai",
-  completionPath: "/v1/chat/completions",
-  model: "local",
+  // ── Model connection ──
+  endpoint: "http://127.0.0.1:8081",       // your model server
+  apiFormat: "openai",                     // "openai" | "ollama" | "custom"
+  completionPath: "/v1/chat/completions",  // openai format only
+  model: "local",                          // model name sent in the request
+  thinking: true,                          // enable reasoning mode if the model supports it
   systemPrompt: "You are a helpful assistant.",
-  windowSize: 20,
-  maxTokenBudget: 32768,
-  reservedTokens: 2048,
+
+  // ── Context window ──
+  windowSize: 20,                          // messages the AI sees per turn
+  maxTokenBudget: 128000,                  // total prompt + completion budget
+  reservedTokens: 2048,                    // headroom kept back for the reply
+
+  // ── Recall ──
+  recallBufferRatio: 0.3,                  // fraction of the prompt budget for recalled nodes
+  maxRetrievedNodes: 5,                    // recall slots per turn
+  retrievalThreshold: 0.5,                 // BM25 score below which archives are searched
+  linkDistance: 2,                         // graph hops followed during recall expansion (0 = off)
+
+  // ── Memory limits ──
   memoryLimitMB: 2048,
-  warnThreshold: 0.8,
+  warnThreshold: 0.8,                      // emit "memory-warning" at this fraction of the limit
+
+  // ── Archiving ──
   archiveBlockSize: 1000,
-  summaryFormat: "json",
+  summaryFormat: "json",                   // "json" | "text"
+
+  // ── Tools & search tuning ──
+  toolMatchThreshold: 0.3,                 // BM25 score for a tool to be considered
+  webSearchEnabled: false,                 // kill switch for the web-search tool
   bm25: { k1: 1.2, b: 0.4 },
-  bloom: { expectedItems: 100000, falsePositiveRate: 0.01 },
-  retrievalThreshold: 0.3,
-  maxRetrievedNodes: 3,
-  deepRetrievalEnabled: true,
-  deepRetrievalThreshold: 2,
-  maxBranches: 7,
-  branchSummaryMaxTokens: 150,
-  recallBufferRatio: 0.3,
-  toolMatchThreshold: 0.1
+  bloom: { expectedItems: 100000, falsePositiveRate: 0.01 }
+
+  // Pluggable parts (storageAdapter, transport, summarizer, nodeNamer) go here too —
+  // see "Bring Your Own Parts" above.
 });
 ```
 
@@ -261,16 +280,19 @@ const memory = new LiminalMemory({
 <summary>Full API Reference</summary>
 
 ```javascript
+// Lifecycle
+await memory.init();                                 // sets up storage (IndexedDB if available)
+
 // Chat (full cycle: tools + retrieval + LLM)
 const { response, toolsUsed } = await memory.chat(message);
 
 // Manual nodes
-memory.append(role, content);
+memory.append(role, content);                        // add a single node
+memory.appendTurn(userMessage, assistantMessage);    // add a user+assistant turn as one node
+memory.addPocketNote(nodeId, note);                  // annotate/correct an existing node
 
-// Search
+// Search & window
 memory.search(query, topK);
-
-// Window
 memory.getWindow();
 
 // Context attachments
@@ -280,13 +302,17 @@ memory.clearContext();
 // Tools
 memory.registerTool(tool);
 
-// Memory operations
-await memory.trim({ from, to });
-await memory.trimKeepRange({ keepStart, keepEnd });
-await memory.branchFrom(nodeId);
-await memory.trimFromHere();
-await memory.branch();
-await memory.restore(archiveKey);
+// Memory operations (archiving)
+await memory.trim({ from, to });                     // archive a contiguous range
+await memory.trimSet(nodeIds);                        // archive an arbitrary, non-contiguous set
+await memory.trimKeepRange({ keepStart, keepEnd });  // keep a range, archive the rest
+await memory.branchFrom(nodeId);                     // archive everything before a point
+await memory.trimFromHere();                         // archive everything before the window
+await memory.branch();                               // archive everything, start fresh
+await memory.restore(archiveKey);                    // bring an archive back into active memory
+
+// Self-organizing graph
+await memory.enrichCategoryNames();                  // upgrade split category names via a plugged-in nodeNamer
 
 // Status & events
 memory.status();
@@ -304,12 +330,12 @@ await memory.import(data);
 
 ```
 src/
-├── core/              # Chain, window, buffers, compaction, retrieval
-├── search/            # BM25, Bloom filter, TF-IDF
+├── core/              # Chain, window, buffers, compaction, retrieval, node splitting
+├── search/            # BM25, Bloom filter, TF-IDF, stemming
 ├── storage/           # RAM tracking, IndexedDB archive
-├── transport/         # Model-agnostic HTTP client
+├── transport/         # Model-agnostic HTTP client (default; swappable)
 ├── tools/             # Tool base class + registry
-├── extensions/        # Web search, datetime (tool implementations)
+├── extensions/        # Web search, datetime, docgen, ingest (tool implementations)
 ├── config.js
 └── index.js
 ```
