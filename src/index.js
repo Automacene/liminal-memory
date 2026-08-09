@@ -354,6 +354,27 @@ export class LuminalMemory {
   }
 
   /**
+   * Archive an arbitrary, non-contiguous set of node ids as one cold-storage block — for
+   * topic clusters that don't occupy a contiguous range.
+   * @param {number[]} nodeIds - the exact set of node ids to archive
+   * @param {object} [summary] - optional manual summary (auto-generated from the nodes if omitted)
+   * @returns {object} compaction marker
+   */
+  async trimSet(nodeIds, summary = null) {
+    if (!this._initialized) await this.init();
+
+    if (!summary) {
+      const ids = new Set(nodeIds);
+      const nodes = this.chain.all().filter(n => ids.has(n.id) && n.role !== "compaction");
+      if (nodes.length > 0) {
+        summary = await this.transport.generateSummary(nodes);
+      }
+    }
+
+    return this.compaction.trimSet(nodeIds, summary);
+  }
+
+  /**
    * Trim keeping only a specified range — archives everything OUTSIDE the range.
    * @param {{ keepStart: number, keepEnd: number }} range - node IDs to KEEP
    * @param {object} [beforeSummary] - summary for the before-block
