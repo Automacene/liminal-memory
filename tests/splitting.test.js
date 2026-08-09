@@ -48,10 +48,12 @@ describe("Phase 3 — deterministic node splitting", () => {
     assert.strictEqual(catOf(d2.id), dbCat, "d2 with d1");
     assert.strictEqual(catOf(d3.id), dbCat, "d3 with d1");
 
-    // Category nodes have a deterministic fallback name + the autoNamed flag for LLM naming.
+    // Category nodes carry a deterministic keyword label + the keyword profile the system
+    // matches on — no LLM naming, so the split path stays fast and fully deterministic.
     for (const c of cats) {
-      assert.ok(c.content && c.content.length > 0, "category has a fallback name");
-      assert.strictEqual(c.metadata.autoNamed, true, "flagged for optional LLM naming");
+      assert.ok(c.content && c.content.length > 0, "category has a deterministic keyword label");
+      assert.ok(Array.isArray(c.keywords) && c.keywords.length > 0, "category carries a keyword profile");
+      assert.ok(Array.isArray(c.metadata.members) && c.metadata.members.length === 3, "category records its 3 members");
       assert.strictEqual(c.graph.edges_to.length, 3, "each category holds its 3 members");
     }
   });

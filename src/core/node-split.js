@@ -38,7 +38,9 @@ export function maybeSplit(chain, hub) {
 
   chain._splitting = true;
   try {
-    // Two category nodes, each named by its group's top shared keyword (fallback name).
+    // Two category nodes, each labeled by its group's top shared keyword — deterministic,
+    // no LLM. The system matches/splits on keyword profiles, not labels, so a fast keyword
+    // label is all a category needs; naming never blocks the retrieval hot path.
     const catA = createCategoryNode(chain, groupA);
     const catB = createCategoryNode(chain, groupB);
 
@@ -101,26 +103,28 @@ export function topSharedKeyword(members) {
 }
 
 /**
- * Create a category node holding the given members and register it on the chain. Name is
- * the deterministic fallback (top shared keyword); metadata.autoNamed marks it so the
- * LLM-naming pass (in LuminalMemory) can upgrade it later without Chain ever touching an LLM.
+ * Create a category node holding the given members and register it on the chain. Its label
+ * is the deterministic top shared keyword (instant, no LLM) and its `keywords` are the union
+ * of its members' keywords — that keyword profile is what the system actually matches and
+ * splits on, so the label is only for display. No LLM naming: keeping the split path fast
+ * and fully deterministic is the whole point (see agents/small-model-constraint.md).
  * @param {import('./chain.js').Chain} chain
  * @param {object[]} members
  * @returns {object} the new category node
  */
 function createCategoryNode(chain, members) {
-  const name = topSharedKeyword(members);
+  const label = topSharedKeyword(members);
   const node = {
     id: chain.nextId,
     parentId: 0,
     role: "category",
     query: "",
     response: "",
-    content: name,
+    content: label,
     timestamp: Date.now(),
-    tokenCount: Math.ceil((name.length || 1) / 4),
+    tokenCount: Math.ceil((label.length || 1) / 4),
     pocketNotes: [],
-    metadata: { isCategory: true, autoNamed: true, members: members.map(m => m.id) },
+    metadata: { isCategory: true, members: members.map(m => m.id) },
     keywords: Array.from(new Set(members.flatMap(m => m.keywords || []))),
     graph: { edges_to: [], edges_from: [] }
   };
