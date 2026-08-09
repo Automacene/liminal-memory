@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { Chain } from "../src/core/chain.js";
+import { differentialKeywords, KEYWORD_FOOTPRINT_CAP } from "../src/core/node-split.js";
 
 describe("Phase 3 — deterministic node splitting", () => {
   it("splits a hub that reaches 6 neighbors into two keyword-grouped category nodes", () => {
@@ -55,7 +56,67 @@ describe("Phase 3 — deterministic node splitting", () => {
       assert.ok(Array.isArray(c.keywords) && c.keywords.length > 0, "category carries a keyword profile");
       assert.ok(Array.isArray(c.metadata.members) && c.metadata.members.length === 3, "category records its 3 members");
       assert.strictEqual(c.graph.edges_to.length, 3, "each category holds its 3 members");
+      // Footprint is bounded — no raw-union match-all hub (the hubness fix).
+      assert.ok(c.keywords.length <= KEYWORD_FOOTPRINT_CAP,
+        `category footprint stays within the cap (${c.keywords.length} <= ${KEYWORD_FOOTPRINT_CAP})`);
     }
+
+    // The footprint is DISTINCTIVE: the animal category carries animal terms and none of the
+    // database terms (and vice-versa). A raw union would have swept both sets into both nodes,
+    // making each a match-all magnet. (animalCat / dbCat resolved above.)
+    for (const dbTerm of ["database", "sql", "indexing"]) {
+      assert.ok(!animalCat.keywords.includes(dbTerm),
+        `animal category should not carry db term "${dbTerm}"`);
+    }
+    for (const animalTerm of ["animals", "pets", "cats"]) {
+      assert.ok(!dbCat.keywords.includes(animalTerm),
+        `db category should not carry animal term "${animalTerm}"`);
+    }
+  });
+
+  it("differentialKeywords keeps distinctive terms, drops shared ones, and stays bounded", () => {
+    const group = [
+      { keywords: ["retrieval", "bm25", "index", "shared", "common"] },
+      { keywords: ["retrieval", "bloom", "index", "shared", "common"] },
+      { keywords: ["retrieval", "tfidf", "shared", "common"] }
+    ];
+    const sibling = [
+      { keywords: ["storage", "archive", "shared", "common"] },
+      { keywords: ["storage", "indexeddb", "shared", "common"] },
+      { keywords: ["storage", "compression", "shared", "common"] }
+    ];
+    // With a tight cap, the distinctiveness ranking is what survives: terms unique to this
+    // group outrank the 50/50 shared terms, so the cap prunes the shared ones away first.
+    const kw = differentialKeywords(group, sibling, 2);
+    assert.ok(kw.includes("retrieval"), "keeps the term distinctive to this group");
+    assert.ok(kw.includes("index"), "keeps the second group-only term (higher purity than shared)");
+    assert.ok(!kw.includes("shared"), "50/50 shared term ranks below distinctive terms → pruned by cap");
+    assert.ok(!kw.includes("common"), "the other shared term is likewise pruned");
+    assert.ok(!kw.includes("storage"), "never carries a sibling-only term");
+    assert.strictEqual(kw.length, 2, "footprint respects the cap");
+
+    // And the default cap is honored too.
+    assert.ok(differentialKeywords(group, sibling).length <= KEYWORD_FOOTPRINT_CAP, "default footprint is bounded");
+  });
+
+  it("global IDF weighting demotes codebase-wide terms that only look locally distinctive", () => {
+    // Both terms are locally distinctive (absent from the sibling, inC=2) → equal local score.
+    const group = [{ keywords: ["retrieval", "common"] }, { keywords: ["retrieval", "common"] }];
+    const sibling = [{ keywords: ["storage"] }];
+
+    // But across the whole corpus, "common" is everywhere (df 90/100) and "retrieval" is rare
+    // (df 3/100). Smoothed IDF (same formula as BM25) crushes the ubiquitous term.
+    const N = 100;
+    const df = new Map([["retrieval", 3], ["common", 90]]);
+    const idf = (t) => Math.log(1 + (N - (df.get(t) || 0) + 0.5) / ((df.get(t) || 0) + 0.5));
+
+    // Single slot: the globally-rare distinctive term must win over the global-noise term.
+    const kw = differentialKeywords(group, sibling, 1, idf);
+    assert.deepStrictEqual(kw, ["retrieval"], "globally-rare term wins; codebase-wide term demoted");
+
+    // Without IDF the two tie (local score only) and "common" is not filtered out.
+    assert.ok(differentialKeywords(group, sibling, 2).includes("common"),
+      "local-only scoring can't tell the global-noise term apart");
   });
 
   it("does not split a node that stays under the threshold", () => {
