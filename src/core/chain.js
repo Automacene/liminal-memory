@@ -11,11 +11,9 @@ export class Chain {
   constructor() {
     this.nodes = [];
     this.nextId = 1;
-    // Off-hot-path node-naming queue. When `recordCategoryNaming` is on (set by LuminalMemory
-    // only when a custom nodeNamer is plugged in), each split records the category nodes it made
-    // here — a cheap synchronous push, NEVER a naming call. Something off the hot path (see
-    // LuminalMemory.enrichCategoryNames) drains it later and upgrades the names. Default off =
-    // zero overhead and exactly today's behavior.
+    // Off-hot-path node-naming queue. When recordCategoryNaming is on (LuminalMemory sets it when a
+    // nodeNamer is plugged in), splits push new category nodes here for later renaming via
+    // LuminalMemory.enrichCategoryNames — never a naming call on the hot path. Default off = no overhead.
     this.recordCategoryNaming = false;
     this.pendingCategoryNaming = [];
   }

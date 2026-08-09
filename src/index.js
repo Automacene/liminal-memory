@@ -434,11 +434,9 @@ export class LuminalMemory {
   }
 
   /**
-   * Upgrade the names of category nodes created by recent splits, using the plugged-in nodeNamer.
-   * This runs OFF the hot path — call it after a turn, on idle, or on demand. The split itself
-   * only ever sets the instant keyword name and queues the node here; the (possibly slow) namer
-   * runs only in this method, so it can never block a split or recall. No-op if no nodeNamer was
-   * supplied or the queue is empty.
+   * Upgrade category-node names via the plugged-in nodeNamer, OFF the hot path — call after a turn
+   * or on idle. Splits only set the instant keyword name and queue the node; the (possibly slow)
+   * namer runs only here, so it never blocks a split or recall. No-op without a nodeNamer.
    * @returns {Promise<number>} how many category nodes were renamed
    */
   async enrichCategoryNames() {

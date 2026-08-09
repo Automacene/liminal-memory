@@ -1,25 +1,16 @@
 /**
- * Node splitting — the "blacksky/darkmind" self-organizing rule (ROADMAP Phase 3).
- *
- * When a node accumulates too many children, it splits them into two keyword-grouped
- * category nodes and demotes itself to point at just those two — the bottom-up neural
- * network forming its own hierarchy through use. Per the split diagram: a hub's leaves
- * (its `edges_to` children) split into two similarity groups; the hub stays the root.
- *
- * This module is pure algorithm + orchestration. It owns NO state — it operates on a
- * Chain passed in, using the Chain's own graph primitives (`get`, `insert`, `_rawLink`,
- * `_unlink`). Chain is the data structure; this is the policy that reshapes it. Keeping
- * them separate is deliberate (see agents/modular-design.md) — Chain shouldn't grow a
- * clustering algorithm inside it.
+ * Node splitting — when a node accumulates too many children it splits them into two
+ * keyword-grouped category nodes and demotes itself to point at just those two, forming a
+ * hierarchy through use. Pure algorithm over a Chain passed in (uses its graph primitives);
+ * it owns no state, so the clustering policy stays out of the Chain data structure.
  */
 
-// Soft target of 3 children per node; the moment a node reaches double that (6), it splits.
+// Soft target of 3 children; a node splits the moment it reaches double that (6).
 export const SOFT_CAP = 3;
 export const SPLIT_THRESHOLD = SOFT_CAP * 2;
 
-// A category node exposes at most this many keywords to the retrieval index. A raw union of
-// its members' keywords turns the category into a match-all "hub" that dominates recall (the
-// hubness problem) and keeps re-overflowing — so we cap the footprint to a distinctive few.
+// Max keywords a category node exposes to the index. The raw union of member keywords would make
+// the category a match-all "hub" that dominates recall and keeps re-overflowing; the cap prevents it.
 export const KEYWORD_FOOTPRINT_CAP = 12;
 
 /**
@@ -43,16 +34,9 @@ export function maybeSplit(chain, hub) {
 
   chain._splitting = true;
   try {
-    // Two category nodes, each labeled by its group's top shared keyword — deterministic,
-    // no LLM. The system matches/splits on keyword profiles, not labels, so a fast keyword
-    // label is all a category needs; naming never blocks the retrieval hot path.
-    // Each category's keyword footprint is scored DIFFERENTIALLY against its sibling group and
-    // weighted by global rarity (IDF over the whole chain), so codebase-wide terms that only
-    // *look* distinctive across this one binary partition don't dominate the profile. The cap
-    // is the real fix (it kills the match-all "magnet"); IDF is a mild, standard refinement.
-    // We deliberately do NOT chase further "filler" removal — the Ephemeral loop makes the
-    // final selection from the candidate set + Sovereign + query, so signpost precision past
-    // this point has diminishing value (see agents note / memory: ephemeral-final-selection).
+    // Two category nodes, labeled by their group's top shared keyword (deterministic, no LLM).
+    // Each footprint is scored differentially against its sibling and weighted by global IDF so
+    // corpus-wide terms don't dominate. The cap is what kills the match-all magnet; IDF refines.
     const idfFn = corpusIdf(chain);
     const catA = createCategoryNode(chain, groupA, differentialKeywords(groupA, groupB, KEYWORD_FOOTPRINT_CAP, idfFn));
     const catB = createCategoryNode(chain, groupB, differentialKeywords(groupB, groupA, KEYWORD_FOOTPRINT_CAP, idfFn));
@@ -65,9 +49,8 @@ export function maybeSplit(chain, hub) {
     for (const m of groupA) chain._rawLink(catA, m);
     for (const m of groupB) chain._rawLink(catB, m);
 
-    // Off-hot-path naming: if a custom namer is plugged in, just record these two new category
-    // nodes for later renaming — a cheap push, no naming work here. Their instant keyword names
-    // are already set above, so the split stays fast and fully deterministic regardless.
+    // If a custom namer is plugged in, queue these categories for off-hot-path renaming.
+    // Their instant keyword names are already set, so the split stays fast.
     if (chain.recordCategoryNaming) {
       chain.pendingCategoryNaming.push(
         { categoryId: catA.id, memberIds: groupA.map(m => m.id) },
@@ -131,26 +114,15 @@ export function topSharedKeyword(members) {
 }
 
 /**
- * Differential keyword footprint for a category node. Rather than the raw union of member
- * keywords — which makes a match-all node that dominates recall (the "hubness" problem) and
- * keeps re-overflowing — score each candidate term by how distinctive it is to THIS group
- * versus its `sibling`, drop the rare tail, and keep the top few. This mirrors *differential
- * cluster labeling* from the IR literature: contrast term distributions across clusters, omit
- * rare terms. The result is a category that stays recall-able on its own theme without
- * swallowing unrelated queries. Deterministic and cheap (term counts over two small groups) —
- * no LLM, no hot-path cost; it runs once, at split time.
- *
- * Score = inCount · (inCount / (inCount + outCount)) · idf(term) — local frequency weighted by
- * its *purity* (the share of the term's mass belonging to this group vs the sibling) and by the
- * term's *global rarity*. Purity handles the local contrast; IDF handles the global one — a term
- * common across the whole graph (`llm`, `prompt`) has an IDF near zero, so however it happens to
- * fall across this one binary partition it can't dominate the footprint. Terms that are both
- * locally distinctive AND globally rare rise to the top.
+ * Distinctive keyword footprint for a category, instead of the raw member union (which would make
+ * a match-all recall hub). Score each term by frequency in `group`, weighted by its purity vs the
+ * `sibling` and by `globalWeight` (global rarity), drop the rare tail, keep the top `cap`.
+ * Deterministic, runs once at split time.
+ *   score = inCount · (inCount / (inCount + outCount)) · globalWeight(term)
  * @param {object[]} group - the category's own members
- * @param {object[]} sibling - the other half of the split, used as the local contrast set
+ * @param {object[]} sibling - the other half of the split (local contrast set)
  * @param {number} [cap=KEYWORD_FOOTPRINT_CAP]
- * @param {(term: string) => number} [globalWeight] - global specificity weight (e.g. IDF ×
- *   co-occurrence specificity); down-weights indiscriminate terms. Defaults to 1 (local-only).
+ * @param {(term: string) => number} [globalWeight] - global rarity weight (IDF); defaults to 1
  * @returns {string[]} distinctive keywords, most-distinctive first, at most `cap`
  */
 export function differentialKeywords(group, sibling, cap = KEYWORD_FOOTPRINT_CAP, globalWeight = null) {
@@ -172,16 +144,9 @@ export function differentialKeywords(group, sibling, cap = KEYWORD_FOOTPRINT_CAP
 }
 
 /**
- * Build a smoothed-IDF function over the chain's current corpus — the global rarity signal a
- * per-split sibling contrast can't see on its own. Document frequency counts how many real
- * content nodes contain each term; category and compaction nodes are excluded so df reflects
- * the actual corpus, not the hierarchy the splitter itself is building (which would feed its
- * own output back into the scoring). The formula matches the BM25 engine's IDF exactly
- * (src/search/bm25.js) so "rarity" means the same thing across retrieval and splitting.
- *
- * Computed once per split (splits are rare and fire at ingest/link time, never on the recall
- * hot path), so a full O(nodes) pass here is cheap and keeps the split path free of any
- * dependency on the search layer — it reads only the Chain it already operates on.
+ * Smoothed-IDF function over the chain's content nodes (category/compaction excluded so the
+ * splitter's own output doesn't feed back into the score). Same formula as the BM25 engine
+ * (src/search/bm25.js). Computed once per split — off the recall hot path — reading only the Chain.
  * @param {import('./chain.js').Chain} chain
  * @returns {(term: string) => number}
  */
@@ -200,13 +165,9 @@ export function corpusIdf(chain) {
 }
 
 /**
- * Create a category node holding the given members and register it on the chain. Its label is
- * the deterministic top shared keyword (instant, no LLM) and its `keywords` are the distinctive
- * footprint computed by the caller (see `differentialKeywords`) — a bounded, distinctive profile
- * rather than the raw member union, so the category doesn't become a match-all recall hub. That
- * keyword profile is what the system matches and splits on; the label is only for display. No
- * LLM naming: keeping the split path fast and fully deterministic is the whole point (see
- * agents/small-model-constraint.md).
+ * Create a category node and register it on the chain. Label = top shared keyword (display only);
+ * `keywords` = the distinctive footprint from the caller (see `differentialKeywords`), which is
+ * what the system actually matches and splits on.
  * @param {import('./chain.js').Chain} chain
  * @param {object[]} members
  * @param {string[]} keywords - the category's distinctive keyword footprint
@@ -214,8 +175,7 @@ export function corpusIdf(chain) {
  */
 function createCategoryNode(chain, members, keywords) {
   const label = topSharedKeyword(members);
-  // Guard: never let a category go keyword-dark. If the differential footprint came back empty
-  // (a degenerate group), fall back to the member union so the node stays recall-able.
+  // Fall back to the member union if the footprint came back empty, so the node stays recall-able.
   const footprint = (keywords && keywords.length)
     ? keywords
     : Array.from(new Set(members.flatMap(m => m.keywords || [])));
