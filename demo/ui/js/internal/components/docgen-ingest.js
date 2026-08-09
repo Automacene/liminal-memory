@@ -153,7 +153,7 @@ var DocGenIngest = (function () {
       if (section.heading === '__overview__') {
         var overviewText = cleanBuffer(section.lines);
         if (overviewText.length > 50) {
-          nodes.push({ content: '[Doc: Project Overview]\n' + overviewText });
+          nodes.push({ content: 'Project Overview\n' + overviewText });
         }
         continue;
       }
@@ -187,7 +187,7 @@ var DocGenIngest = (function () {
       // Create file summary node (includes path, line count, exports, deps, description)
       var summaryText = cleanBuffer(summaryBuffer);
       if (summaryText.length > 30) {
-        nodes.push({ content: '[Doc: ' + filePath + '] Summary\n' + summaryText });
+        nodes.push({ content: filePath + '\n' + summaryText });
       }
 
       // Create function nodes (each tagged with full file path)
@@ -195,7 +195,7 @@ var DocGenIngest = (function () {
         var fn = functions[f];
         var fnContent = cleanBuffer(fn.lines);
         if (fnContent.length > 20) {
-          nodes.push({ content: '[Doc: ' + filePath + ' → ' + fn.name + ']' + fn.meta + '\n' + fnContent });
+          nodes.push({ content: filePath + ' ' + fn.name + '\n' + fnContent });
         }
       }
     }
@@ -207,16 +207,29 @@ var DocGenIngest = (function () {
    * Clean a buffer of lines — remove HTML tags, empty lines at start/end, collapse whitespace.
    */
   function cleanBuffer(lines) {
-    return lines
-      .filter(function (l) {
-        // Keep code blocks and content, skip HTML wrapper tags and separators
-        if (l === '---') return false;
-        if (/^<\/?details>?/.test(l)) return false;
-        if (/^<summary>/.test(l)) return false;
-        if (/^<a id=/.test(l)) return false;
-        return true;
-      })
-      .join('\n')
+    var out = [];
+    var inCode = false;
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      // Drop fenced code blocks entirely — the <details>Source</details> dumps are pure
+      // syntax/variable-name noise that swamp the keyword profile with non-topic tokens.
+      if (/^\s*```/.test(l)) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      // Drop HTML wrappers, separators, and structural scaffolding lines.
+      if (l === '---') continue;
+      if (/^<\/?details>?/.test(l)) continue;
+      if (/^<summary>/.test(l)) continue;
+      if (/^<a id=/.test(l)) continue;
+      if (/^\s*\*\*\d+\s*lines?\*\*\s*\|/i.test(l)) continue;                                   // "**638 lines** | 4 functions/classes"
+      if (/^\s*#{2,4}\s+(Exports|Dependencies|Functions\s*&\s*Methods)\s*$/i.test(l)) continue; // structural headers
+      out.push(l);
+    }
+    // Strip markdown emphasis/heading/backtick punctuation so keywords come from words,
+    // not syntax; then collapse whitespace.
+    return out.join('\n')
+      .replace(/[`*#>]/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
 
