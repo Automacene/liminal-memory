@@ -1,50 +1,63 @@
 {
   "name": "@automacene/liminal-memory",
   "version": "1.0.0",
-  "description": "Zero-dependency infinite context memory for any LLM. Runs in browser and Node.js.",
-  "main": "dist/liminal-memory.umd.js",
-  "module": "src/index.js",
-  "browser": "dist/liminal-memory.umd.js",
+  "description": "Deterministic retrieval over a pool of nodes. Bring your own tagging, graph, and content. Zero dependencies, browser and Node.",
   "type": "module",
+  "author": "Automacene (https://github.com/Automacene)",
+  "contributors": [
+    "Codie Petersen"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Automacene/liminal-memory#readme",
+  "bugs": {
+    "url": "https://github.com/Automacene/liminal-memory/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automacene/liminal-memory.git"
+  },
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "unpkg": "dist/liminal-memory.min.js",
+  "jsdelivr": "dist/liminal-memory.min.js",
+  "browser": "dist/liminal-memory.min.js",
+  "sideEffects": false,
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./src/index.js",
-      "require": "./dist/liminal-memory.umd.js",
-      "browser": "./dist/liminal-memory.umd.js"
-    }
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
   },
-  "sideEffects": false,
   "files": [
-    "dist/",
-    "src/"
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "esbuild src/index.js --bundle --minify --outfile=dist/liminal-memory.min.js --format=esm",
-    "build:umd": "esbuild src/index.js --bundle --minify --outfile=dist/liminal-memory.umd.js --format=iife --global-name=LiminalMemory",
-    "test": "node --test tests/*.test.js",
-    "dev": "esbuild src/index.js --bundle --outfile=dist/liminal-memory.js --format=esm --watch",
-    "demo": "npm run build:umd && node serve.js"
+    "test": "node --test",
+    "build": "npm run build:esm && npm run build:iife && npm run build:types",
+    "build:esm": "esbuild src/index.js --bundle --format=esm --outfile=dist/liminal-memory.esm.js",
+    "build:iife": "esbuild src/index.js --bundle --format=iife --global-name=LiminalMemory --minify --outfile=dist/liminal-memory.min.js",
+    "build:types": "tsc",
+    "prepublishOnly": "npm test && npm run build"
   },
   "keywords": [
-    "llm",
     "memory",
-    "context",
+    "retrieval",
     "bm25",
-    "bloom-filter",
-    "infinite-context",
-    "local-ai",
-    "sliding-window"
+    "search",
+    "llm",
+    "context",
+    "nodes"
   ],
-  "author": "Automacene",
-  "license": "Apache-2.0",
   "devDependencies": {
-    "cheerio": "^1.2.0",
     "esbuild": "^0.21.0",
-    "gifuct-js": "^2.1.2",
-    "turndown": "^7.2.4",
-    "pdf-parse": "^2.4.5",
-    "playwright": "^1.62.1",
-    "tesseract.js": "^7.0.0",
-    "unpdf": "^1.8.0"
+    "typescript": "^5.6.0"
   }
 }
