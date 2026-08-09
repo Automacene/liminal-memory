@@ -64,13 +64,28 @@ export class LiminalMemory {
    * Get a pool, LAZILY CREATING it if this is the first mention of that name. There is no
    * separate step for declaring a pool, so a typo in a pool name gives you a new empty pool
    * rather than an error.
+   *
+   * Passing options for a pool that already exists reconfigures it rather than being ignored,
+   * so this doubles as the way to attach a hook after the fact. The one exception is `engine`,
+   * which holds the pool's index and cannot be swapped without throwing the index away.
+   *
    * @param {string} [name]  defaults to the default pool
-   * @param {object} [options]  `now` and `onEvict` for a new pool; ignored if it already exists
+   * @param {object} [options]  `now`, `onEvict`, `tagger`, `graph`, and (on creation) `engine`
    * @returns {Pool}
    */
   pool(name = this.defaultPoolName, options = {}) {
     const existing = this._pools.get(name);
-    if (existing) return existing;
+    if (existing) {
+      // Configure rather than ignore. `pool("active", { onEvict })` reads like it sets the
+      // hook, so it sets the hook, whether or not this is the first mention of the name.
+      // Silently dropping the options was a real bug during development and gave no signal at
+      // all: eviction simply did nothing.
+      if (options.onEvict !== undefined) existing.onEvict = options.onEvict;
+      if (options.tagger !== undefined) existing.tagger = options.tagger;
+      if (options.graph !== undefined) existing.graph = options.graph;
+      if (options.now !== undefined) existing.now = options.now;
+      return existing;
+    }
 
     const inherited = typeof this.engine === "function" ? this.engine() : this.engine;
 

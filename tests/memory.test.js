@@ -113,3 +113,24 @@ describe("serialization", () => {
     assert.equal(node.pool, "main");
   });
 });
+
+describe("reconfiguring a pool that already exists", () => {
+  test("passing a hook for an existing pool attaches it instead of being dropped", async () => {
+    const mem = new LiminalMemory({ defaultPool: "active" });
+
+    const seen = [];
+    mem.pool("active", { onEvict: nodes => seen.push(...nodes.map(n => n.id)) });
+
+    await mem.create({ id: "a", content: "one" });
+    await mem.pool("active").evictOldest(1);
+
+    assert.deepEqual(seen, ["a"], "the hook was attached to the already-created default pool");
+  });
+
+  test("options left out do not disturb what is already set", async () => {
+    const mem = new LiminalMemory({ now: () => 7 });
+    const pool = mem.pool("main", { onEvict: () => {} });
+
+    assert.equal(pool.now(), 7, "clock survived a call that only set onEvict");
+  });
+});
