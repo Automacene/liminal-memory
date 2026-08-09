@@ -563,6 +563,7 @@
       if (n > 0) {
         console.log('[NodeNamer] upgraded ' + n + ' category node name(s) via the NLP plug');
         refreshStats();
+        autoSave(); // naming runs after the turn's autoSave, so persist the new names now
       }
     }).catch(function (e) { console.warn('[NodeNamer] enrich failed:', e.message); });
   }
