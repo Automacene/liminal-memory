@@ -30,8 +30,6 @@ export class Tool {
     this.execute = execute;
     this.discovery = discovery;
     this._registered = false;
-
-    console.log(`[Tool:${this.name}] Created (discovery: ${this.discovery}) — "${this.description.slice(0, 60)}..."`);
   }
 
   /**
@@ -75,13 +73,11 @@ export class Tool {
    * @returns {object} { success: boolean, result: any, error?: string }
    */
   async run(params, context = {}) {
-    console.log(`[Tool:${this.name}] Executing with params:`, JSON.stringify(params).slice(0, 200));
     const startTime = Date.now();
 
     try {
       const result = await this.execute(params, context);
       const elapsed = Date.now() - startTime;
-      console.log(`[Tool:${this.name}] Success in ${elapsed}ms`);
       return { success: true, result, elapsed };
     } catch (err) {
       const elapsed = Date.now() - startTime;

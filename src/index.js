@@ -115,7 +115,6 @@ export class LuminalMemory {
         if (result.success) {
           toolResults.push({ name: toolDecision.name, result: result.result });
           toolsUsed.push({ name: toolDecision.name, params: toolDecision.params, result: result.result, elapsed: result.elapsed });
-          console.log(`[Chat] Tool "${toolDecision.name}" executed successfully in ${result.elapsed}ms`);
         } else {
           console.warn(`[Chat] Tool "${toolDecision.name}" failed: ${result.error}`);
         }
@@ -197,7 +196,6 @@ export class LuminalMemory {
 
     try {
       const { text: decision } = await this.transport.complete(messages);
-      console.log(`[Chat] Tool decision raw: ${decision.slice(0, 300)}`);
 
       // Clean up common model formatting issues before parsing
       let cleaned = decision
@@ -217,7 +215,7 @@ export class LuminalMemory {
           if (!parsed.use) return null;
           return { name: parsed.tool, params: parsed.params || {} };
         } catch (e) {
-          console.log(`[Chat] JSON parse failed, trying alternate formats: ${e.message}`);
+          // fall through to the alternate model formats below
         }
       }
 
@@ -232,21 +230,18 @@ export class LuminalMemory {
         for (const kv of kvMatches) {
           params[kv[1]] = kv[2].trim().replace(/^>+/, '').replace(/>+$/, '');
         }
-        console.log(`[Chat] Parsed Gemma tool call: ${toolName}`, params);
         return { name: toolName, params };
       }
 
       // Parse generic function call format: tool_name("query")
       const funcMatch = decision.match(/(\w+)\(["']([^"']+)["']\)/);
       if (funcMatch) {
-        console.log(`[Chat] Parsed function-style call: ${funcMatch[1]}("${funcMatch[2]}")`);
         return { name: funcMatch[1], params: { query: funcMatch[2] } };
       }
 
       // If the model just said it wants to search, extract a short query
       var searchIntent = decision.match(/search(?:ing)?\s+(?:for\s+)?["']([^"']+)["']/i);
       if (searchIntent && this.toolRegistry && this.toolRegistry.get('web_search')) {
-        console.log(`[Chat] Inferred search intent: "${searchIntent[1].trim()}"`);
         return { name: 'web_search', params: { query: searchIntent[1].trim().slice(0, 80) } };
       }
 

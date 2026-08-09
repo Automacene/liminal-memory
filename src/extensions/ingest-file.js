@@ -38,10 +38,9 @@ export async function extractPdfText(buffer, opts = {}) {
     } else if (typeof result.text === 'string') {
       extracted = result.text;
     }
-    console.log('[PDF:unpdf] Pages:', result.totalPages, '| Text length:', extracted.length);
     if (extracted.trim().length > 100) return extracted;
   } catch (err) {
-    console.log('[PDF:unpdf] Failed:', err.message);
+    // extractor failed — fall through to the next strategy
   }
 
   // Strategy 2: pdf-parse
@@ -51,20 +50,18 @@ export async function extractPdfText(buffer, opts = {}) {
     const pdfParseFn = require("pdf-parse");
     const data = await pdfParseFn(buffer);
     text = data.text || '';
-    console.log('[PDF:pdf-parse] Pages:', data.numpages, '| Text length:', text.length);
     if (text.trim().length > 100) return text;
   } catch (err) {
-    console.log('[PDF:pdf-parse] Failed:', err.message);
+    // extractor failed — fall through to OCR
   }
 
   // Strategy 3: OCR all pages via Playwright + tesseract.js
   if (opts.dataDir) {
-    console.log('[PDF:OCR] Text extractors failed, attempting OCR on all pages...');
     try {
       text = await ocrAllPages(buffer, opts);
       if (text.trim().length > 50) return text;
     } catch (err) {
-      console.log('[PDF:OCR] Failed:', err.message);
+      // OCR failed — return whatever text we have
     }
   }
 
@@ -101,8 +98,6 @@ async function ocrAllPages(buffer, opts) {
     await page.goto(pdfUrl, { waitUntil: 'networkidle', timeout: 20000 });
     await new Promise(r => setTimeout(r, 3000));
 
-    console.log('[PDF:OCR] Scanning pages...');
-
     const worker = await createWorker('eng');
     let emptyStreak = 0;
 
@@ -113,7 +108,6 @@ async function ocrAllPages(buffer, opts) {
       if (text && text.trim().length > 20) {
         allText.push(text.trim());
         emptyStreak = 0;
-        console.log('[PDF:OCR] Page', i + 1, ':', text.trim().length, 'chars');
       } else {
         emptyStreak++;
         if (emptyStreak >= 3) break;

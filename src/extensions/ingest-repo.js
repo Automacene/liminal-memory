@@ -66,8 +66,6 @@ export async function ingestRepo(repoUrl, dataDir, customIgnores = []) {
     return { nodes: [], error: 'Git clone failed: ' + err.message };
   }
 
-  console.log('[Ingest:Repo] Cloned. Walking files...');
-
   const allChunks = [];
 
   async function walk(dir, relPath = '') {
@@ -104,7 +102,6 @@ export async function ingestRepo(repoUrl, dataDir, customIgnores = []) {
 
   // Clean up
   await rm(tempDir, { recursive: true, force: true }).catch(() => {});
-  console.log('[Ingest:Repo] Done. Chunks:', allChunks.length);
 
   return { nodes: allChunks };
 }
