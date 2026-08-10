@@ -5,7 +5,9 @@
   "type": "module",
   "author": "Automacene (https://github.com/Automacene)",
   "contributors": [
-    "Codie Petersen"
+    "Codie Petersen",
+    "Joshua Torgerson",
+    "Asteres Technologies LLC"
   ],
   "license": "Apache-2.0",
   "homepage": "https://github.com/Automacene/liminal-memory#readme",
