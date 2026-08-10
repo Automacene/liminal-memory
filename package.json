@@ -45,6 +45,7 @@
     "test:examples": "node --test \"examples/**/*.test.js\"",
     "test:types": "npm run build:types && tsc -p tests/types",
     "test:all": "npm test && npm run test:types",
+    "verify:pack": "node scripts/verify-package.mjs",
     "example": "node examples/chat-session/run.js",
     "build": "npm run build:esm && npm run build:cjs && npm run build:iife && npm run build:types",
     "build:esm": "esbuild src/index.js --bundle --format=esm --outfile=dist/liminal-memory.esm.js",

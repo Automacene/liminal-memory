@@ -34,10 +34,11 @@ jobs:
         # the check that actually matters before publishing.
         run: npm run test:types
 
-      - run: npm run build
-
-      - name: Package contents
-        run: npm pack --dry-run
+      - name: Verify the packed package
+        # Packs, installs the tarball into a throwaway project, and imports it every way a
+        # consumer can. This is the check that catches an exports map pointing at a file that
+        # is not in the tarball, which is invisible from inside the repo.
+        run: npm run verify:pack
 
   publish:
     # Tag a release with `git tag v1.2.3 && git push --tags` to publish.
