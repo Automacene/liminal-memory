@@ -167,3 +167,6 @@ data/
 
 # Generated DocGen output (build artifact, regenerated on demand)
 DOCUMENTATION.md
+
+# Build output — generated at publish time, never committed
+dist
