@@ -14,11 +14,14 @@
  * version will import.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repo = resolve(import.meta.dirname, "..");
+// Not `import.meta.dirname`, which only exists from Node 20.11 and would break the oldest
+// version in the support matrix. This form works everywhere.
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const scratch = mkdtempSync(join(tmpdir(), "liminal-verify-"));
 const results = [];
 
@@ -52,7 +55,7 @@ const tarball = readdirSync(scratch).find(f => f.endsWith(".tgz"));
 console.log(`  packed  ${tarball}`);
 
 const project = join(scratch, "consumer");
-run("mkdir", ["-p", project]);
+mkdirSync(project, { recursive: true });
 writeFileSync(join(project, "package.json"), JSON.stringify({
   name: "consumer", version: "1.0.0", type: "module", private: true
 }, null, 2));
@@ -144,7 +147,8 @@ check("published types resolve from the package name", () => {
   return "a strict consumer compiles";
 });
 check("the tarball carries dist and src, and nothing else", () => {
-  const listing = run("tar", ["-tzf", join(scratch, tarball)], scratch).trim().split("\n");
+  const listing = JSON.parse(run("npm", ["pack", "--dry-run", "--json"], repo))[0]
+    .files.map(f => `package/${f.path}`);
   const stray = listing.filter(f => /package\/(tests|examples|scripts)\//.test(f));
   if (stray.length > 0) throw new Error(`should not ship: ${stray.join(", ")}`);
 
