@@ -211,6 +211,7 @@ export class Pool {
    * @param {number} [options.limit]
    * @param {string|Node} [options.from]  the node asking, excluded from results and linked to them
    * @param {boolean} [options.link]  set false to search without writing edges
+   * @param {number} [options.minScore]  drop anything scoring below this, 0 to 1
    * @returns {Promise<Node[]>}
    */
   async search(query, options = {}) {
@@ -230,7 +231,7 @@ export class Pool {
    * @param {number} [options.limit]
    * @returns {Promise<{node: Node, score: number}[]>}
    */
-  async rank(query, { limit = 10, from = null, link = true } = {}) {
+  async rank(query, { limit = 10, from = null, link = true, minScore = 0 } = {}) {
     await this._drainLazyIndex();
 
     const asker = this._resolveNode(from);
@@ -243,8 +244,9 @@ export class Pool {
     const ranked = [];
     for (const hit of hits) {
       if (asker && hit.id === asker.id) continue;
+      if (hit.score < minScore) break; // hits are ordered, so the rest are worse
       const node = this._nodes.get(hit.id);
-      if (node) ranked.push({ node, score: hit.score });
+      if (node) ranked.push({ node, score: hit.score, raw: hit.raw });
       if (ranked.length === limit) break;
     }
 

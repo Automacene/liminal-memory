@@ -58,6 +58,47 @@ const hits = await mem.search("when is the report due");
 `search` gives you whole nodes, best first. Feed them to your model however you like: this
 library never talks to one.
 
+## Scores and thresholds
+
+`rank` is `search` with the scores kept. They run from 0 to 1, so one threshold works everywhere:
+
+```js
+const hits = await mem.rank("when is the report due", { minScore: 0.5 });
+// [{ node, score: 0.89, raw: 2.13 }]
+```
+
+Raw BM25 is unbounded, and its size depends on how many words the query had, so a two word query
+and a ten word query sit on different scales and no fixed cutoff can serve both. Each score here
+is divided by the query's achievable weight and then put through a logistic curve, which keeps
+the gradation where the keep-or-drop decision actually happens. `raw` is still there if you want
+the unbounded number.
+
+In the bundled example a genuine match lands around 0.9 and incidental word overlap around 0.25,
+so 0.5 separates them. Calibrate to your own corpus with `inflection` and `slope`:
+
+```js
+import { BM25, defaults } from "@automacene/liminal-memory";
+
+const mem = new LiminalMemory({
+  engine: () => new BM25({ inflection: 0.7, slope: 10 })  // stricter, more decisive
+});
+```
+
+To go back to plain unbounded BM25, exactly what any textbook implementation gives you, turn
+calibration off:
+
+```js
+const mem = new LiminalMemory({ engine: () => new BM25({ calibrated: false }) });
+```
+
+`score` is then the raw figure and `minScore` compares against that scale. Ordering is identical
+either way, since the curve is monotonic, so this only changes what the numbers look like.
+
+One tradeoff worth knowing about calibration: for a single word query every returned node
+contains that word, so its rarity is identical across them and cancels out. Rarity still shapes
+ranking across a multi word query, where matching the unusual word carries far more weight than
+matching the common one. Turning calibration off keeps rarity in the number.
+
 ## The node
 
 Every node has the same six fields. Three of them are yours to fill with anything.
