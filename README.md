@@ -251,4 +251,4 @@ and `rank` as shorthand for the default pool.
 
 ## License
 
-Apache 2.0
+_An Asteres Technologies_ Apache 2.0 library.
