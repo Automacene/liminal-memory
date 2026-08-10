@@ -25,7 +25,7 @@ async function container() {
     now: () => 1000,
     onEvict: async nodes => nodes.length,
     tagger: keywordTagger(),
-    engine: () => new BM25({ k1: 1.2, b: 0.4 }),
+    engine: () => new BM25({ k1: 1.2, b: 0.4, inflection: 0.5, slope: 6, calibrated: true }),
     graph: decayGraph({ decayMs: 60_000 })
   });
 
@@ -40,8 +40,9 @@ async function container() {
   const hits = await mem.search("report", { from: id, limit: 5 });
   const firstId: string = hits[0].id;
 
-  const ranked = await mem.rank("report", { from: node, link: false });
+  const ranked = await mem.rank("report", { from: node, link: false, minScore: 0.4 });
   const score: number = ranked[0].score;
+  const raw: number = ranked[0].raw;
   const rankedId: string = ranked[0].node.id;
 
   const linked: boolean = mem.link(id, structural.id, 1000);
@@ -57,7 +58,7 @@ async function container() {
   mem.load(snapshot);
   mem.clear();
 
-  return [pool, createdAt, firstId, score, rankedId, linked, permanent, direction, observedAt, total, names, found];
+  return [pool, createdAt, firstId, score, raw, rankedId, linked, permanent, direction, observedAt, total, names, found];
 }
 
 async function pools() {
@@ -87,10 +88,11 @@ function customPieces() {
   const pool = new Pool("custom", { tagger });
   const terms: string[] = extractKeywords("the quarterly report", { minLength: 4 });
   const k1: number = defaults.bm25.k1;
+  const inflection: number = defaults.bm25.inflection;
   const decayMs: number = defaults.graph.decayMs;
   const minLength: number = defaults.keywords.minLength;
 
-  return [pool.name, terms, k1, decayMs, minLength];
+  return [pool.name, terms, k1, inflection, decayMs, minLength];
 }
 
 export { container, pools, customPieces };

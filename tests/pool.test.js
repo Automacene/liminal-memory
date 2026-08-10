@@ -174,3 +174,66 @@ describe("serialization", () => {
     assert.deepEqual(restored.list(), pool.list());
   });
 });
+
+describe("scores and thresholds", () => {
+  test("scores land between 0 and 1", async () => {
+    const pool = testPool();
+    await pool.create({ id: "strong", content: "the quarterly revenue report" });
+    await pool.create({ id: "weak", content: "the report was fine" });
+    await pool.create({ id: "other", content: "lunch with sam" });
+
+    for (const hit of await pool.rank("quarterly revenue report")) {
+      assert.ok(hit.score > 0 && hit.score < 1, `${hit.node.id} scored ${hit.score}`);
+    }
+  });
+
+  test("a closer match scores higher", async () => {
+    const pool = testPool();
+    await pool.create({ id: "strong", content: "the quarterly revenue report" });
+    await pool.create({ id: "weak", content: "a report about lunch" });
+
+    const hits = await pool.rank("quarterly revenue report");
+
+    assert.equal(hits[0].node.id, "strong");
+    assert.ok(hits[0].score > hits[1].score);
+  });
+
+  test("minScore drops the weak tail", async () => {
+    const pool = testPool();
+    await pool.create({ id: "strong", content: "the quarterly revenue report" });
+    await pool.create({ id: "weak", content: "a report about lunch" });
+
+    const all = await pool.rank("quarterly revenue report");
+    assert.equal(all.length, 2, "both match something");
+
+    const cut = (all[0].score + all[1].score) / 2;
+    const filtered = await pool.rank("quarterly revenue report", { minScore: cut });
+
+    assert.deepEqual(filtered.map(hit => hit.node.id), ["strong"]);
+  });
+
+  test("the raw unbounded score is still available", async () => {
+    const pool = testPool();
+    await pool.create({ id: "a", content: "the quarterly report" });
+
+    const [hit] = await pool.rank("report");
+    assert.equal(typeof hit.raw, "number");
+    assert.notEqual(hit.raw, hit.score);
+  });
+
+  test("a threshold means the same thing for a short and a long query", async () => {
+    // The point of calibrating at all. Both queries fully describe their target, so both should
+    // clear the same threshold, even though the raw scores differ by a lot.
+    const pool = testPool();
+    await pool.create({ id: "a", content: "alpha" });
+    await pool.create({ id: "b", content: "beta gamma delta epsilon zeta" });
+    await pool.create({ id: "c", content: "nothing in common here" });
+
+    const short = await pool.rank("alpha", { minScore: 0.5 });
+    const long = await pool.rank("beta gamma delta epsilon zeta", { minScore: 0.5 });
+
+    assert.deepEqual(short.map(h => h.node.id), ["a"]);
+    assert.deepEqual(long.map(h => h.node.id), ["b"]);
+    assert.ok(long[0].raw > short[0].raw * 2, "raw scores are on very different scales");
+  });
+});

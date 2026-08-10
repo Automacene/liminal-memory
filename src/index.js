@@ -212,7 +212,8 @@ export class LiminalMemory {
    * Search the default pool, keeping scores.
    * @param {string} query
    * @param {object} [options]
-   * @returns {Promise<{node: Node, score: number}[]>}
+   * @returns {Promise<{node: Node, score: number, raw: number}[]>} `score` in 0 to 1, `raw`
+   *   the uncalibrated BM25 figure
    */
   rank(query, options) {
     return this.pool().rank(query, this._withAsker(options));
