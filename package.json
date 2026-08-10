@@ -1,6 +1,6 @@
 {
   "name": "@automacene/liminal-memory",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Deterministic retrieval over a pool of nodes. Bring your own tagging, graph, and content. Zero dependencies, browser and Node.",
   "type": "module",
   "author": "Automacene (https://github.com/Automacene)",
